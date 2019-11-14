@@ -44,7 +44,8 @@ func flags() {
     //flag.Int64Var(&notification_time,"notif_period", 300, "How frequent we are sending info about same mac")
     flag.StringVar(&proto_db,"proto", "udp", "protocol we are listening by")
     flag.StringVar(&port_db,"listen", ":37008", "server:port we are listening on")
-    flag.StringVar(&NOTIF_URL,"api", "https://46b4477f329048829f0ec979cb629e02.domru.ru/raw",
+    //flag.StringVar(&NOTIF_URL,"api", "https://46b4477f329048829f0ec979cb629e02.domru.ru/raw",  
+    flag.StringVar(&NOTIF_URL,"api", "http://10.147.99.29:8080/captured_macs",        
         "url where we are going to post so called 'raw data ;)'")
     flag.StringVar(&ouiFileUrl,"ouiurl", "http://standards-oui.ieee.org/oui.txt",
         "url with oui database file")

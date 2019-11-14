@@ -5,8 +5,7 @@ import (
     "io"
     "time"
     "net"
-    "strings"
-    "github.com/google/go-cmp/cmp"
+    //"strings"
     "strconv"
     "runtime"
     "enforta/tzspanalyser"
@@ -16,6 +15,7 @@ import (
     "bytes"
     "sync"
     "sync/atomic"
+    //"github.com/google/go-cmp/cmp"
    // "reflect"
    // "fmt"    
 )
@@ -235,11 +235,11 @@ func handlePacket(conn *net.UDPConn , quit chan struct{}) {
         }
 
         Raw_fr := tzsp["dot11header"].([]byte)
-        Dot11,err := tzspanalyser.ParseDot11(Raw_fr)
+        Dot11,_ := tzspanalyser.ParseDot11(Raw_fr)
 
-        if err != nil {
-            log.Trace("Some warning while parsing dot11 layer: ",err)
-        }
+        // if err != nil {
+        //     log.Trace("Some warning while parsing dot11 layer: ",err)
+        // }
 
         log.WithFields(logrus.Fields{
             "sensor_id": tzsp["sensor_id"], "sensor_ip": udp.IP,
@@ -255,53 +255,55 @@ func handlePacket(conn *net.UDPConn , quit chan struct{}) {
             "RawDot11" :    Raw_fr}).Trace(  //Trace
             "the frame from sniffer:" +tzsp["sensor_id"].(string))    
 
-        if len(Dot11.Address2) != 0 && cmp.Equal(Dot11.Address2, Dot11.Address3) {
-    			       // fmt.Println("vendor",vendor)
-        	APmac := Dot11.Address2
-        	//log.Info("found beacon from ",APmac)
-    	    c := captured_AP{
-            src_ip: udp.IP.String(),
-            vendor: VendorName(APmac),
-            sensor_id: tzsp["sensor_id"].(string),
-            mac: APmac.String()}
-        	CacheAP(c)
-        	continue
-        }
+        // if len(Dot11.Address2) != 0 && cmp.Equal(Dot11.Address2, Dot11.Address3) {
+    			 //       // fmt.Println("vendor",vendor)
+        // 	APmac := Dot11.Address2
+        // 	//log.Info("found beacon from ",APmac)
+    	   //  c := captured_AP{
+        //     src_ip: udp.IP.String(),
+        //     vendor: VendorName(APmac),
+        //     sensor_id: tzsp["sensor_id"].(string),
+        //     mac: APmac.String()}
+        // 	CacheAP(c)
+        // 	continue
+        // }
 
+        if Dot11.Type.String() == "MgmtProbeReq" {
     	mac := Dot11.Address2
-    	if len(mac) != 0 {
-    		if MacIsFine(mac) {
+        	if len(mac) != 0 {
+        		if MacIsFine(mac) {
 
-    			if ap_cached(tzsp["sensor_id"].(string),mac.String()) { continue }
-    			vendor := VendorName(mac)
-    			//fmt.Println("vendor:",vendor)
+        			//if ap_cached(tzsp["sensor_id"].(string),mac.String()) { continue }
+        			vendor := VendorName(mac)
+        			//fmt.Println("vendor:",vendor)
 
-                // ignore some frame types , vendors and flags...
-                flags := strings.Split(Dot11.Flags.String(), ",")
-    			if !ignore_frames[Dot11.Type.String()] && !ignore_vendors[vendor] &&
-                !ignore_flags[flags[0]] {
+                    // ignore some frame types , vendors and flags...
+                    //flags := strings.Split(Dot11.Flags.String(), ",")
+        			// if !ignore_frames[Dot11.Type.String()] && !ignore_vendors[vendor] &&
+           //          !ignore_flags[flags[0]] {
 
-                    log.WithFields(logrus.Fields{
-                        "sensor_id": tzsp["sensor_id"], "sensor_ip": udp.IP,
-                        "Type" :    Dot11.Type, "Flags" :  Dot11.Flags,
-                        "mac1": Dot11.Address1, "mac2": Dot11.Address2,
-                        "mac3": Dot11.Address3, "mac4": Dot11.Address4,
-                        "vendor" : vendor,
-                        "RSSI" :  tzsp["RSSI"]}).Trace("new mac discovered"+mac.String()) 
+                        log.WithFields(logrus.Fields{
+                            "sensor_id": tzsp["sensor_id"], "sensor_ip": udp.IP,
+                            "Type" :    Dot11.Type, "Flags" :  Dot11.Flags,
+                            "mac1": Dot11.Address1, "mac2": Dot11.Address2,
+                            "mac3": Dot11.Address3, "mac4": Dot11.Address4,
+                            "vendor" : vendor,
+                            "RSSI" :  tzsp["RSSI"]}).Trace("active_mac="+mac.String()) 
 
-    			    c := captured_MAC{
-    	            src_ip: udp.IP.String(),
-    	            vendor: vendor,
-    	            sensor_id: tzsp["sensor_id"].(string),
-    	            mac: mac.String(),
-                    channel: tzsp["rx_channel"].(int64),
-    	            position: 2,
-    	            RSSI_current: tzsp["RSSI"].(int64)}
+        			    c := captured_MAC{
+        	            src_ip: udp.IP.String(),
+        	            vendor: vendor,
+        	            sensor_id: tzsp["sensor_id"].(string),
+        	            mac: mac.String(),
+                        channel: tzsp["rx_channel"].(int64),
+        	            position: 2,
+        	            RSSI_current: tzsp["RSSI"].(int64)}
 
-    	        	CacheMac(c)
-    			}
-    		}
-    	}	    	
+        	        	CacheMac(c)
+        			//}
+        		}
+        	}
+        }   	
     	    
     }
 
@@ -319,10 +321,6 @@ func snif_is_active(mac string,ip string) bool {
         return false
     }
     return true
-
-    // active_sniffers.Lock()
-    // active_sniffers.m[s] = true
-    // active_sniffers.Unlock()
 }
 
 func CacheMac(c captured_MAC) {
@@ -332,7 +330,7 @@ func CacheMac(c captured_MAC) {
 
     if it_is_new {
         
-        log.Trace("New mac saved in cache:",c.mac," ",c.vendor)
+        log.Debug("New mac saved in cache:",c.mac," ",c.vendor)
         atomic.AddInt64(&macs_discovered, 1) // macs_discovered ++
         atomic.AddInt64(&macs_discovered_total, 1) // macs_discovered_total ++
         //log.Trace("cache length:",len(captured_macs_cache))

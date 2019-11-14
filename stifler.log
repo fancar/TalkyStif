@@ -8803,3 +8803,7 @@ time="2019-11-08T17:07:57+03:00" level=info msg="running info" active snifs=1 go
 time="2019-11-08T17:08:57+03:00" level=info msg="running info" active snifs=1 goroutines=7 macs_discovered_period=8 macs_discovered_total=71 macs_sent_period=100 macs_sent_total=332 period avg pps=202 period_seconds=60 uptime=3m0.002635012s
 time="2019-11-08T17:09:57+03:00" level=info msg="running info" active snifs=1 goroutines=7 macs_discovered_period=9 macs_discovered_total=80 macs_sent_period=152 macs_sent_total=484 period avg pps=759 period_seconds=60 uptime=4m0.008626748s
 time="2019-11-08T17:10:57+03:00" level=info msg="running info" active snifs=1 goroutines=7 macs_discovered_period=3 macs_discovered_total=83 macs_sent_period=106 macs_sent_total=590 period avg pps=180 period_seconds=60 uptime=5m0.009200563s
+time="2019-11-14T11:11:19+03:00" level=info msg="Waiting for TZSP flows..."
+time="2019-11-14T11:11:19+03:00" level=info msg="running info" active snifs=0 goroutines=6 macs_discovered_period=0 macs_discovered_total=0 macs_sent_period=0 macs_sent_total=0 period avg pps=1 period_seconds=60 uptime=9.187991ms
+time="2019-11-14T11:11:43+03:00" level=info msg="Waiting for TZSP flows..."
+time="2019-11-14T11:11:43+03:00" level=info msg="running info" active snifs=0 goroutines=6 macs_discovered_period=0 macs_discovered_total=0 macs_sent_period=0 macs_sent_total=0 period avg pps=1 period_seconds=60 uptime="749.78µs"

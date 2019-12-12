@@ -448,7 +448,9 @@ func Logrus_fields(s MainStats) logrus.Fields {
 }
 
 
-/* put statiscics from time to time */
+/* POST statiscics and log it from time to time
+stats_period var (logtime parameter)
+ */
 func print_stats() {
     for {
         
@@ -462,7 +464,9 @@ func print_stats() {
         log.WithFields(logfields).Info(  //Trace
             "statistics for ",stat.Period," seconds:")
 
+        main_cache.Lock() 
         j, _ := json.Marshal(data)
+        main_cache.Unlock()
         PostJson(j,STATS_URL)
 
         //reset counters

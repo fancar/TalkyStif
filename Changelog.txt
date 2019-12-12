@@ -1,0 +1,10 @@
+#Change.log
+# tzsp collector anslyser for mikrotiks
+# reads 802.11 headers in tzsp payload and post if new
+# mac and unique
+
+
+#0.5.2 12/12/19
+#case: collect all metrics from collectors | ZABBIX monitoring
+- able to send collector's statistics via simple POST
+

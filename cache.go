@@ -191,15 +191,9 @@ func (m captured_AP) store() (bool, error) {
     if cache.first_time == 0 {
         cache = m
         cache.first_time = time.Now().Unix()
-        
-        log.Trace(cache.name()," - The NEW AP stored: ",cache.id())
-        result = true
-        
-        
-    } //else {
-        //log.Info(cache.name()," - the AP is updating: ",cache.id())
-
-    //}
+        //log.Trace(cache.name()," - The NEW AP stored: ",cache.id())
+        result = true   
+    }
 
     cache.update_time = time.Now().UnixNano()
     cache.remove_time = time.Now().Unix() + atomic.LoadInt64(&mac_remember_cache) 
@@ -234,7 +228,7 @@ func (m captured_MAC) store() (bool, error) { // m is the data from packet!
     cache.notified = false // switch off the flag if MAC apears
 
     if cache.first_time == 0 {
-        snif.new_macs ++
+        snif.New_macs ++
         cache = m
         cache.first_time = time.Now().Unix()
         log.Trace(cache.sensor_id," - The NEW MAC stored in cache: ",cache.mac)
@@ -294,40 +288,45 @@ func (m captured_MAC) unlock() {
 /*basic interface for data to cache*/
 
 /* structure of cache for captured MACs */
-type captured_snif struct {
-    pps,packets_total,packets_period int64
-    first_time,update_time int64
-    ip,id string
-    badsnif bool
-    macs map[string]captured_MAC
-    new_macs,post_macs int64
+type captured_snif struct { 
+    Ip string                       `json:"ip"`
+    Id string                       `json:"id"`    
+    Pps int64                       `json:"pps"`
+    Packets_total int64             `json:"total_cnt"`
+    Packets_period int64            `json:"pct_cnt"`
+    First_time int64                `json:"ts_first"`
+    Update_time int64               `json:"ts_last"`
+    Badsnif bool                    `json:"badsnif"`
+    macs map[string]captured_MAC    `json:"-"`
+    New_macs int64                  `json:"new_macs"`
+    Post_macs int64                 `json:"post_macs"`
 }
 
 func (new captured_snif) store() (bool, error) { // m is the data from packet!
     //cached := captured_macs_cache[m.id()]
     result := false
 
-    cache := main_cache.snifs[new.id]
+    cache := main_cache.snifs[new.Id]
 
-    if cache.first_time == 0 { // if new sniffer in cache
+    if cache.First_time == 0 { // if new sniffer in cache
         cache = new
         cache.macs = make(map[string]captured_MAC)
-        cache.first_time = time.Now().Unix()
-        log.Debug(cache.id,": the NEW Snif has been detected with ip: ",cache.ip)
+        cache.First_time = time.Now().Unix()
+        log.Debug(cache.Id,": the NEW Snif has been detected with ip: ",cache.Ip)
         result = true
     }
-    if cache.ip != new.ip  {
-        log.Warning("%s: ip is changed: (old:%snew%s)",cache.id,cache.ip,new.ip)
-        cache.ip = new.ip
+    if cache.Ip != new.Ip  {
+        log.Warning("%s: ip is changed: (old:%snew%s)",cache.Id,cache.Ip,new.Ip)
+        cache.Ip = new.Ip
     }
-    cache.packets_total ++
-    cache.packets_period ++
+    cache.Packets_total ++
+    cache.Packets_period ++
 
-    cache.update_time = time.Now().UnixNano()
+    cache.Update_time = time.Now().UnixNano()
 
 /* other here */
 
-    main_cache.snifs[cache.id] = cache
+    main_cache.snifs[cache.Id] = cache
     return result, nil
 
 }
@@ -351,4 +350,36 @@ func SaveItInCache(l cache_int) (bool,error) {
 
 }
 
+func CountSnifs() int {
+    main_cache.Lock()
+    result := len(main_cache.snifs)
+    main_cache.Unlock()
+    return result
+}
 
+
+/* output statistics as json */
+func GetSnifs() map[string]captured_snif {
+    main_cache.Lock()
+    result := main_cache.snifs
+    main_cache.Unlock()
+    return result
+
+    // if err != nil{
+    //     log.Error("json err: ",err)
+    //     return nil
+    // } else {
+    //     return result
+    // }    
+}
+            // data := map[string]string{
+            //     "id": vi.id, //strconv.FormatInt(vi.id, 10),
+            //     "ip": vi.ip, // strconv.FormatInt(vi.ip, 10),
+            //     "macs": strconv.Itoa(len(vi.macs)),
+            //     "post_macs": strconv.FormatInt(vi.post_macs, 10),
+            //     "new_macs": strconv.FormatInt(vi.new_macs, 10),
+            //     "pps": strconv.FormatInt(vi.pps, 10),
+            //     "pct_cnt": strconv.FormatInt(vi.packets_period, 10),
+            //     "total_cnt": strconv.FormatInt(vi.packets_total, 10),
+            //     "ts_first": strconv.FormatInt(vi.first_time, 10),
+            //     "ts_last": strconv.FormatInt(vi.update_time/1000000000, 10),

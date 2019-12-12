@@ -1,7 +1,7 @@
 package main
 
 import (
-	"strconv"
+	//"strconv"
 	"fmt"
 	"net/http"
 	"github.com/gorilla/mux"
@@ -50,40 +50,54 @@ func loginGetHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "Auth is Required!")
 }
 
+// func SniffersGetHandler(w http.ResponseWriter, r *http.Request) {
+// 	    w.Header().Set("Content-Type", "application/json")
+//         main_cache.Lock()
+//         snifs := main_cache.snifs
+
+//         type keyvalue map[string]string
+//         keyvalueslice := make([]keyvalue,0)
+        
+//         for _,vi := range snifs {
+//         	data := map[string]string{
+//         		"id": vi.id, //strconv.FormatInt(vi.id, 10),
+//         		"ip": vi.ip, // strconv.FormatInt(vi.ip, 10),
+//         		"macs": strconv.Itoa(len(vi.macs)),
+//         		"post_macs": strconv.FormatInt(vi.post_macs, 10),
+//         		"new_macs": strconv.FormatInt(vi.new_macs, 10),
+//         		"pps": strconv.FormatInt(vi.pps, 10),
+//         		"pct_cnt": strconv.FormatInt(vi.packets_period, 10),
+//         		"total_cnt": strconv.FormatInt(vi.packets_total, 10),
+//         		"ts_first": strconv.FormatInt(vi.first_time, 10),
+//         		"ts_last": strconv.FormatInt(vi.update_time/1000000000, 10),
+//         		//"ts_fist": vi.first_time,
+//         		//"ts_last": vi.update_time,
+//         	}
+
+//         	keyvalueslice = append(keyvalueslice,data)
+//         }
+//         main_cache.Unlock()
+
+//         j, err := json.Marshal(keyvalueslice)
+            
+//         if err != nil{
+//         	log.Error("json err: ",err)
+//         } else { w.Write(j) }
+
+// }
+
 func SniffersGetHandler(w http.ResponseWriter, r *http.Request) {
 	    w.Header().Set("Content-Type", "application/json")
-        main_cache.Lock()
-        snifs := main_cache.snifs
 
-        type keyvalue map[string]string
-        keyvalueslice := make([]keyvalue,0)
-        
-        for _,vi := range snifs {
-        	data := map[string]string{
-        		"id": vi.id, //strconv.FormatInt(vi.id, 10),
-        		"ip": vi.ip, // strconv.FormatInt(vi.ip, 10),
-        		"macs": strconv.Itoa(len(vi.macs)),
-        		"post_macs": strconv.FormatInt(vi.post_macs, 10),
-        		"new_macs": strconv.FormatInt(vi.new_macs, 10),
-        		"pps": strconv.FormatInt(vi.pps, 10),
-        		"pct_cnt": strconv.FormatInt(vi.packets_period, 10),
-        		"total_cnt": strconv.FormatInt(vi.packets_total, 10),
-        		"ts_first": strconv.FormatInt(vi.first_time, 10),
-        		"ts_last": strconv.FormatInt(vi.update_time/1000000000, 10),
-        		//"ts_fist": vi.first_time,
-        		//"ts_last": vi.update_time,
-        	}
-
-        	keyvalueslice = append(keyvalueslice,data)
-        }
-        main_cache.Unlock()
-
-        j, err := json.Marshal(keyvalueslice)
+	    snifs := GetSnifs()
+	    result,err := json.Marshal(snifs)
             
-        if err != nil{
-        	log.Error("json err: ",err)
-        } else { w.Write(j) }
-
+        if err == nil{
+        	w.Write(result)
+        } else {
+        	w.WriteHeader(http.StatusInternalServerError)
+        	w.Write([]byte(err.Error()))
+        }
 }
 
 

@@ -15,8 +15,8 @@ var (
     timewait time.Duration = 10 // default time-cycle (if errors) at the start
     
     
-    log_file, loglevel,port_db, proto_db,NOTIF_URL string
-    version string = "0.5.0 beta"
+    log_file, loglevel,port_db, proto_db,NOTIF_URL,STATS_URL string
+    version string = "0.5.1 beta"
     Version string = "Talky Stif | TZSP colector with concurency | "+version
     
     log = logrus.New()
@@ -45,7 +45,10 @@ func flags() {
     flag.StringVar(&proto_db,"proto", "udp", "protocol we are listening by")
     flag.StringVar(&port_db,"listen", ":37008", "server:port we are listening on")
     flag.StringVar(&NOTIF_URL,"api", "https://46b4477f329048829f0ec979cb629e02.domru.ru/raw",
-        "url where we are going to post so called 'raw data ;)'")
+        "url we are going to post so called 'raw data ;)'")
+    flag.StringVar(&STATS_URL,"stats-url", "http://10.190.51.229:8090/collector_stats",
+        "url we are going to post collector's stats")
+
     flag.StringVar(&ouiFileUrl,"ouiurl", "http://standards-oui.ieee.org/oui.txt",
         "url with oui database file")
 

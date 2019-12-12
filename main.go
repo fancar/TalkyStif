@@ -6,18 +6,21 @@ import (
     "time"
     "net"
     "strings"
-    "github.com/google/go-cmp/cmp"
+    //"github.com/google/go-cmp/cmp"
     "strconv"
     "runtime"
     "enforta/tzspanalyser"
     "github.com/sirupsen/logrus"
+    "github.com/shirou/gopsutil/load"
+    //"github.com/shirou/gopsutil/cpu"
+    "github.com/shirou/gopsutil/mem"
     "encoding/json"
     "net/http"
     "bytes"
     "sync"
     "sync/atomic"
    // "reflect"
-   // "fmt"    
+    //"fmt"    
 )
 
 var (
@@ -255,9 +258,12 @@ func handlePacket(conn *net.UDPConn , quit chan struct{}) {
             "RawDot11" :    Raw_fr}).Trace(  //Trace
             "the frame from sniffer:" +tzsp["sensor_id"].(string))    
 
-        if len(Dot11.Address2) != 0 && cmp.Equal(Dot11.Address2, Dot11.Address3) {
-    			       // fmt.Println("vendor",vendor)
+        if Dot11.Type.String() == "MgmtProbeResp" ||
+           Dot11.Type.String() == "MgmtBeacon" {
+        //if len(Dot11.Address2) != 0 && cmp.Equal(Dot11.Address2, Dot11.Address3) {
+    			       
         	APmac := Dot11.Address2
+            log.Trace(Dot11.Type.String()," - Looks like AP and will be ignored. detected from: ",APmac," - ",VendorName(APmac))
         	//log.Info("found beacon from ",APmac)
     	    c := captured_AP{
             src_ip: udp.IP.String(),
@@ -274,12 +280,12 @@ func handlePacket(conn *net.UDPConn , quit chan struct{}) {
 
     			if ap_cached(tzsp["sensor_id"].(string),mac.String()) { continue }
     			vendor := VendorName(mac)
-    			//fmt.Println("vendor:",vendor)
 
                 // ignore some frame types , vendors and flags...
                 flags := strings.Split(Dot11.Flags.String(), ",")
-    			if !ignore_frames[Dot11.Type.String()] && !ignore_vendors[vendor] &&
-                !ignore_flags[flags[0]] {
+    			//if !ignore_frames[Dot11.Type.String()] &&
+                if !ignore_vendors[vendor] &&
+                   !ignore_flags[flags[0]] {
 
                     log.WithFields(logrus.Fields{
                         "sensor_id": tzsp["sensor_id"], "sensor_ip": udp.IP,
@@ -287,7 +293,7 @@ func handlePacket(conn *net.UDPConn , quit chan struct{}) {
                         "mac1": Dot11.Address1, "mac2": Dot11.Address2,
                         "mac3": Dot11.Address3, "mac4": Dot11.Address4,
                         "vendor" : vendor,
-                        "RSSI" :  tzsp["RSSI"]}).Trace("new mac discovered"+mac.String()) 
+                        "RSSI" :  tzsp["RSSI"]}).Trace("Gotcha: "+mac.String()) 
 
     			    c := captured_MAC{
     	            src_ip: udp.IP.String(),
@@ -311,7 +317,7 @@ func handlePacket(conn *net.UDPConn , quit chan struct{}) {
 
 /* just mark the sniffer as active (for counter) */
 func snif_is_active(mac string,ip string) bool {
-    s := captured_snif{id:mac,ip:ip}
+    s := captured_snif{Id:mac,Ip:ip}
 
     _,err := SaveItInCache(s) 
     if err != nil {
@@ -319,10 +325,6 @@ func snif_is_active(mac string,ip string) bool {
         return false
     }
     return true
-
-    // active_sniffers.Lock()
-    // active_sniffers.m[s] = true
-    // active_sniffers.Unlock()
 }
 
 func CacheMac(c captured_MAC) {
@@ -375,41 +377,170 @@ func MacIsFine(mac net.HardwareAddr) bool {
     return false
 }
 
-/* put some info in logs from time to time */
+type MainStats struct {
+    NumCPU int              `json:"NumCPU"`
+    Snifs int               `json:"snifs"`
+    Goroutines int          `json:"goroutines"`
+    Pps int64               `json:"pps"`
+    Timestamp int64         `json:"ts_last"`
+    Mem_usage int           `json:"mem_usage"`
+    Load_prcnt int          `json:"load_prcnt"`
+    Period int64            `json:"period"`
+    Load_1m float64         `json:"load_1m"`
+    Load_5m float64         `json:"load_5m"`
+    Load_15m float64            `json:"load_15m"`
+    Macs_discovered int64       `json:"macs_discovered"`
+    Macs_discovered_total int64 `json:"macs_discovered_total"`
+    Macs_sent int64         `json:"macs_sent"`
+    Macs_sent_total int64   `json:"macs_sent_total"`
+    //Uptime int64 `json:"uptime"`
+    Uptime int64            `json:"uptime_sec"`
+}
+
+type CombinedStats struct {
+    Main MainStats `json:"main"`
+    Snifs map[string]captured_snif `json:"snifs"`
+}
+
+/* build statistics for logs and POST */
+func CollectStats() MainStats {
+    s := MainStats{}
+    load, _ := load.Avg()
+    numcpu := runtime.NumCPU()
+    time_now := time.Now().Unix()
+    v, _ := mem.VirtualMemory()
+    st_p := atomic.LoadInt64(&stats_period)
+
+    s.NumCPU = numcpu
+    s.Snifs = CountSnifs()
+    s.Goroutines = runtime.NumGoroutine()
+    s.Pps = atomic.LoadInt64(&packets_count) / st_p
+    s.Timestamp = time_now
+    s.Mem_usage = int(v.UsedPercent)
+    s.Load_prcnt = int(load.Load1 * 100 / float64(numcpu))
+    s.Period = atomic.LoadInt64(&stats_period)
+    s.Load_1m = load.Load1
+    s.Load_5m = load.Load5
+    s.Load_15m = load.Load15
+    s.Macs_discovered = atomic.LoadInt64(&macs_discovered)
+    s.Macs_discovered_total = atomic.LoadInt64(&macs_discovered_total)
+    s.Macs_sent = atomic.LoadInt64(&macs_notified)
+    s.Macs_sent_total = atomic.LoadInt64(&macs_notified_total)
+    //s.Uptime = time.Since(start_time)
+    s.Uptime = time_now - start_time.Unix()
+
+    return s
+
+}
+
+/* choose what fields we put in log */
+func Logrus_fields(s MainStats) logrus.Fields {
+    result := logrus.Fields{
+        "snifs"            : s.Snifs,
+        "goroutines"       : s.Goroutines,
+        "load"             : s.Load_prcnt,
+        "mem"              : s.Mem_usage,
+        "pps"              : s.Pps,
+        "macs_sent"        : s.Macs_sent,
+        "macs_discovered"  : s.Macs_discovered,
+    }
+    return result
+}
+
+
+/* put statiscics from time to time */
 func print_stats() {
-
     for {
-        //log.Debug("HERE STATISTICS")
+        
+        stat := CollectStats()
+        snifs := GetSnifs()
 
-        main_cache.Lock()
-        snifs_no := len(main_cache.snifs)
-        main_cache.Unlock()
+        data := CombinedStats{ Main : stat, Snifs : snifs, }
 
-        st_p := atomic.LoadInt64(&stats_period)
+        logfields := Logrus_fields(stat)
 
-        log.WithFields(logrus.Fields{
-            "active snifs" : snifs_no,
-            "goroutines" : runtime.NumGoroutine(),
-            "period_seconds": st_p,
-            "period avg pps" : atomic.LoadInt64(&packets_count) / st_p + 1, // atomic.LoadUint64(
-            "macs_discovered_period": atomic.LoadInt64(&macs_discovered),
-            "macs_sent_period" :  atomic.LoadInt64(&macs_notified),
-            "macs_discovered_total" :  atomic.LoadInt64(&macs_discovered_total),
-            "macs_sent_total": atomic.LoadInt64(&macs_notified_total),
-            //"captured_macs_cache_len": len(captured_macs_cache),
-            //"captured_AP_cache_len":len(captured_AP_cache),
-            "uptime": time.Since(start_time)}).Info(  //Trace
-            "running info")	
+        log.WithFields(logfields).Info(  //Trace
+            "statistics for ",stat.Period," seconds:")
+
+        j, _ := json.Marshal(data)
+        PostJson(j,STATS_URL)
 
         //reset counters
         atomic.SwapInt64(&macs_discovered, 0)
         atomic.SwapInt64(&packets_count, 0)
-        atomic.SwapInt64(&macs_notified, 0)
+        atomic.SwapInt64(&macs_notified, 0)        
 
-        time.Sleep(time.Duration(st_p * 1000) * time.Millisecond)
-	}
+        time.Sleep(time.Duration(stat.Period) * time.Second)
+    }
 
 }
+
+
+/* put some info in logs from time to time */
+// func print_stats() {
+
+//     for {
+//         //log.Debug("HERE STATISTICS")
+//         load, _ := load.Avg()
+//         v, _ := mem.VirtualMemory()
+//         numcpu := runtime.NumCPU()
+
+//         load_prcnt := int(load.Load1 * 100 / float64(numcpu))
+
+//         main_cache.Lock()
+//         snifs_no := len(main_cache.snifs)
+//         main_cache.Unlock()
+
+//         time_now := time.Now().Unix()
+
+//         st_p := atomic.LoadInt64(&stats_period)
+//         uptime := time.Since(start_time)
+//         pps := atomic.LoadInt64(&packets_count) / st_p
+//         uptime_u := time_now - start_time.Unix()
+        
+//         //mem usage percents
+//         memory := strconv.Itoa(int(v.UsedPercent))
+
+//         log.WithFields(logrus.Fields{
+//             "snifs" : snifs_no,
+//             "goroutines" : runtime.NumGoroutine(),
+//             "period": st_p,
+//             "load": load.Load1,
+//             "load_prcnt" : load_prcnt,
+//             "mem_usage" : memory,
+//             "pps" : pps, // atomic.LoadUint64(
+//             "macs_discovered": atomic.LoadInt64(&macs_discovered),
+//             "macs_sent" :  atomic.LoadInt64(&macs_notified),
+//             "macs_discovered_total" :  atomic.LoadInt64(&macs_discovered_total),
+//             "macs_sent_total": atomic.LoadInt64(&macs_notified_total),
+//             //"captured_macs_cache_len": len(captured_macs_cache),
+//             //"captured_AP_cache_len":len(captured_AP_cache),
+//             "uptime": uptime}).Info(  //Trace
+//             "running info for period")	
+
+//         //reset counters
+//         atomic.SwapInt64(&macs_discovered, 0)
+//         atomic.SwapInt64(&packets_count, 0)
+//         atomic.SwapInt64(&macs_notified, 0)
+
+//         d := map[string]string{
+//         "NumCPU" : strconv.Itoa(numcpu),
+//         "snifs" : strconv.Itoa(snifs_no),
+//         "goroutines" : strconv.Itoa(runtime.NumGoroutine()),
+//         "pps" : strconv.FormatInt(pps, 10),
+//         "uptime" : strconv.FormatInt(uptime_u,10),
+//         "last_ts" : strconv.FormatInt(time_now, 10),
+//         "mem_usage" : memory,
+//         "load_prcnt" : strconv.Itoa(load_prcnt),
+//         //"load_1m" : fmt.Sprintf("%.2f", load.Load1),
+//         }
+
+//         PostStats(d)
+
+//         time.Sleep(time.Duration(st_p) * time.Second)
+// 	}
+
+// }
 
 /* periodical check in cache for jobs and remove old notes */
 func cache_handler() {
@@ -424,25 +555,25 @@ func cache_handler() {
         cache_map := main_cache.snifs
 
         for j,sn := range cache_map {
-            if sn.update_time != 0 {
+            if sn.Update_time != 0 {
                 st_p := atomic.LoadInt64(&post_period)
 
-                sn.pps = sn.packets_period / st_p + 1
+                sn.Pps = sn.Packets_period / st_p + 1
 
                 log.WithFields(logrus.Fields{
-                "snifid": sn.id,
-                "snifip": sn.ip,
+                "snifid": sn.Id,
+                "snifip": sn.Ip,
                 "macs": len(sn.macs),
-                "packets": sn.packets_period,
-                "p_total": sn.packets_total,
-                "pps": sn.pps,
+                "packets": sn.Packets_period,
+                "p_total": sn.Packets_total,
+                "pps": sn.Pps,
                 }).Debug(  //Trace
                 "a sniffer statistics")
 
-                sn.packets_period = 0
+                sn.Packets_period = 0
                 
-                sn.new_macs = 0
-                sn.post_macs = 0                
+                sn.New_macs = 0
+                sn.Post_macs = 0                
 
                 for i,vi := range sn.macs {
 
@@ -458,6 +589,7 @@ func cache_handler() {
                         log.WithFields(logrus.Fields{
                         "snifid": vi.sensor_id,
                         "snifip": vi.src_ip,
+                        "kn_from": vi.first_time,
                         "mac": vi.mac,
                         "Ch" : vi.channel,
                         "FrCnt" : vi.count_as_addr2,
@@ -483,7 +615,7 @@ func cache_handler() {
                         }
 
                         notif_list = append(notif_list,data)
-                        sn.post_macs ++
+                        sn.Post_macs ++
 
                         //vi.notif_time = time.Now().Unix() + notification_time
                         vi.notified = true
@@ -540,18 +672,72 @@ func cache_handler() {
 
         time.Sleep(time.Duration(atomic.LoadInt64(&post_period) * 1000) * time.Millisecond)
     }
+}
 
+func PostJson(jsonValue []byte, url string) {
+    req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonValue))
+
+    if err != nil {
+        log.WithFields(logrus.Fields{
+            "error": err, "server url": url}).Error(
+            "Can not make http request. Bad URL? ")
+    }
+
+    //req.Header.Set("X-Custom-Header", "myvalue")
+    req.Header.Set("Content-Type", "application/json")
+
+    client := &http.Client{}
+    resp, err := client.Do(req)
+    if err != nil {
+        log.WithFields(logrus.Fields{
+            "error": err, "server url": url}).Error(
+            "Can not send request to http server. ")
+    } else {
+        defer resp.Body.Close()    
+        log.Debug("Posted statistics. Response Status:'", resp.Status)
+    }         
+}
+
+
+func PostStats( d map[string]string ) {
+    jsonValue, _ := json.Marshal(d)
+    req, err := http.NewRequest("POST", STATS_URL, bytes.NewBuffer(jsonValue))
+
+    if err != nil {
+        log.WithFields(logrus.Fields{
+            "error": err, "server url": STATS_URL}).Error(
+            "Can not make http request. Bad URL? ")
+    }
+
+    //req.Header.Set("X-Custom-Header", "myvalue")
+    req.Header.Set("Content-Type", "application/json")
+
+    client := &http.Client{}
+    resp, err := client.Do(req)
+    if err != nil {
+        log.WithFields(logrus.Fields{
+            "error": err, "server url": STATS_URL}).Error(
+            "Can not send request to http server. ")
+    } else {
+        defer resp.Body.Close()    
+        log.Debug("Posted statistics. Response Status:'", resp.Status)
+    }
 }
 
 
 /* post new macs in cache as list */
 func PostMacList(list []interface{}) { // map[string][]interface{}
 
-    //log.Trace("Current list to POST: ",list)
     jsonValue, _ := json.Marshal(list)
     req, err := http.NewRequest("POST", NOTIF_URL, bytes.NewBuffer(jsonValue))
 
-    req.Header.Set("X-Custom-Header", "myvalue")
+    if err != nil {
+        log.WithFields(logrus.Fields{
+            "error": err, "server url": NOTIF_URL}).Error(
+            "Can not make notif http request. Bad URL? ")
+    }
+
+    //req.Header.Set("X-Custom-Header", "myvalue")
     req.Header.Set("Content-Type", "application/json")
 
     client := &http.Client{}
@@ -565,17 +751,8 @@ func PostMacList(list []interface{}) { // map[string][]interface{}
 
     atomic.SwapInt64(&macs_notified, atomic.LoadInt64(&macs_notified)  + int64(len(list)))        
     atomic.SwapInt64(&macs_notified_total, atomic.LoadInt64(&macs_notified_total)  + int64(len(list)))
-    // for _,s := range list {
 
-    //     atomic.SwapInt64(&macs_notified, atomic.LoadInt64(&macs_notified)  + int64(len(s)))
-    //     atomic.SwapInt64(&macs_notified_total, atomic.LoadInt64(&macs_notified_total)  + int64(len(s)))
-        //macs_notified = macs_notified + int64(len(s))
-        //macs_notified_total = macs_notified_total + int64(len(s))
-    //}
-    //body, _ := ioutil.ReadAll(resp.Body)   // need to uncomment "io/ioutil"
     log.Debug("POST MAC-list. Response Status:'", resp.Status,"'. MACS sent:",len(list))//,
-        //" Response Headers:", resp.Header,
-        //" Response Body:", string(body))
     }
 }
 

@@ -16,6 +16,8 @@ var (
     
     
     log_file, loglevel,port_db, proto_db,NOTIF_URL,STATS_URL string
+    TOKEN string
+    BEARER_TOKEN string = "Bearer " + TOKEN
     version string = "0.5.1 beta"
     Version string = "Talky Stif | TZSP colector with concurency | "+version
     
@@ -44,10 +46,12 @@ func flags() {
     //flag.Int64Var(&notification_time,"notif_period", 300, "How frequent we are sending info about same mac")
     flag.StringVar(&proto_db,"proto", "udp", "protocol we are listening by")
     flag.StringVar(&port_db,"listen", ":37008", "server:port we are listening on")
-    flag.StringVar(&NOTIF_URL,"api", "https://46b4477f329048829f0ec979cb629e02.domru.ru/raw",
+    flag.StringVar(&NOTIF_URL,"api", "http://10.190.51.229:8090/captured_macs", //https://46b4477f329048829f0ec979cb629e02.domru.ru/raw
         "url we are going to post so called 'raw data ;)'")
     flag.StringVar(&STATS_URL,"stats-url", "http://10.190.51.229:8090/collector_stats",
         "url we are going to post collector's stats")
+
+    flag.StringVar(&TOKEN,"token", "", "Bearer token for stats-url and api url")
 
     flag.StringVar(&ouiFileUrl,"ouiurl", "http://standards-oui.ieee.org/oui.txt",
         "url with oui database file")

@@ -20,7 +20,7 @@ import (
     "sync"
     "sync/atomic"
    // "reflect"
-    //"fmt"    
+   //"fmt"    
 )
 
 var (
@@ -480,72 +480,6 @@ func print_stats() {
 }
 
 
-/* put some info in logs from time to time */
-// func print_stats() {
-
-//     for {
-//         //log.Debug("HERE STATISTICS")
-//         load, _ := load.Avg()
-//         v, _ := mem.VirtualMemory()
-//         numcpu := runtime.NumCPU()
-
-//         load_prcnt := int(load.Load1 * 100 / float64(numcpu))
-
-//         main_cache.Lock()
-//         snifs_no := len(main_cache.snifs)
-//         main_cache.Unlock()
-
-//         time_now := time.Now().Unix()
-
-//         st_p := atomic.LoadInt64(&stats_period)
-//         uptime := time.Since(start_time)
-//         pps := atomic.LoadInt64(&packets_count) / st_p
-//         uptime_u := time_now - start_time.Unix()
-        
-//         //mem usage percents
-//         memory := strconv.Itoa(int(v.UsedPercent))
-
-//         log.WithFields(logrus.Fields{
-//             "snifs" : snifs_no,
-//             "goroutines" : runtime.NumGoroutine(),
-//             "period": st_p,
-//             "load": load.Load1,
-//             "load_prcnt" : load_prcnt,
-//             "mem_usage" : memory,
-//             "pps" : pps, // atomic.LoadUint64(
-//             "macs_discovered": atomic.LoadInt64(&macs_discovered),
-//             "macs_sent" :  atomic.LoadInt64(&macs_notified),
-//             "macs_discovered_total" :  atomic.LoadInt64(&macs_discovered_total),
-//             "macs_sent_total": atomic.LoadInt64(&macs_notified_total),
-//             //"captured_macs_cache_len": len(captured_macs_cache),
-//             //"captured_AP_cache_len":len(captured_AP_cache),
-//             "uptime": uptime}).Info(  //Trace
-//             "running info for period")	
-
-//         //reset counters
-//         atomic.SwapInt64(&macs_discovered, 0)
-//         atomic.SwapInt64(&packets_count, 0)
-//         atomic.SwapInt64(&macs_notified, 0)
-
-//         d := map[string]string{
-//         "NumCPU" : strconv.Itoa(numcpu),
-//         "snifs" : strconv.Itoa(snifs_no),
-//         "goroutines" : strconv.Itoa(runtime.NumGoroutine()),
-//         "pps" : strconv.FormatInt(pps, 10),
-//         "uptime" : strconv.FormatInt(uptime_u,10),
-//         "last_ts" : strconv.FormatInt(time_now, 10),
-//         "mem_usage" : memory,
-//         "load_prcnt" : strconv.Itoa(load_prcnt),
-//         //"load_1m" : fmt.Sprintf("%.2f", load.Load1),
-//         }
-
-//         PostStats(d)
-
-//         time.Sleep(time.Duration(st_p) * time.Second)
-// 	}
-
-// }
-
 /* periodical check in cache for jobs and remove old notes */
 func cache_handler() {
 
@@ -583,7 +517,7 @@ func cache_handler() {
 
                     if !vi.notified { // vi.notif_time < time.Now().Unix() && !vi.notified
                         // append to notif_list the mac
-                        t := strconv.FormatInt(vi.update_time/1000000000, 10)
+                        t := strconv.FormatInt(vi.update_time/1e9, 10)
                         
                         var rssi_avg int64 = -127
                         if vi.count_as_addr2 > 0 {rssi_avg = vi.RSSI_sum / vi.count_as_addr2}
@@ -594,6 +528,7 @@ func cache_handler() {
                         "snifid": vi.sensor_id,
                         "snifip": vi.src_ip,
                         "kn_from": vi.first_time,
+                        "last_ts": t,
                         "mac": vi.mac,
                         "Ch" : vi.channel,
                         "FrCnt" : vi.count_as_addr2,
@@ -689,6 +624,10 @@ func PostJson(jsonValue []byte, url string) {
 
     //req.Header.Set("X-Custom-Header", "myvalue")
     req.Header.Set("Content-Type", "application/json")
+    if TOKEN != "" {
+        BEARER_TOKEN := "Bearer " + TOKEN
+        req.Header.Add("Authorization", BEARER_TOKEN)
+    }
 
     client := &http.Client{}
     resp, err := client.Do(req)
@@ -700,32 +639,6 @@ func PostJson(jsonValue []byte, url string) {
         defer resp.Body.Close()    
         log.Debug("Posted statistics. Response Status:'", resp.Status)
     }         
-}
-
-
-func PostStats( d map[string]string ) {
-    jsonValue, _ := json.Marshal(d)
-    req, err := http.NewRequest("POST", STATS_URL, bytes.NewBuffer(jsonValue))
-
-    if err != nil {
-        log.WithFields(logrus.Fields{
-            "error": err, "server url": STATS_URL}).Error(
-            "Can not make http request. Bad URL? ")
-    }
-
-    //req.Header.Set("X-Custom-Header", "myvalue")
-    req.Header.Set("Content-Type", "application/json")
-
-    client := &http.Client{}
-    resp, err := client.Do(req)
-    if err != nil {
-        log.WithFields(logrus.Fields{
-            "error": err, "server url": STATS_URL}).Error(
-            "Can not send request to http server. ")
-    } else {
-        defer resp.Body.Close()    
-        log.Debug("Posted statistics. Response Status:'", resp.Status)
-    }
 }
 
 
@@ -743,6 +656,10 @@ func PostMacList(list []interface{}) { // map[string][]interface{}
 
     //req.Header.Set("X-Custom-Header", "myvalue")
     req.Header.Set("Content-Type", "application/json")
+    if TOKEN != "" {
+        BEARER_TOKEN := "Bearer " + TOKEN
+        req.Header.Add("Authorization", BEARER_TOKEN)
+    }
 
     client := &http.Client{}
     resp, err := client.Do(req)

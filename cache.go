@@ -225,7 +225,6 @@ func (m captured_MAC) store() (bool, error) { // m is the data from packet!
     snif := main_cache.snifs[m.sensor_id]
 
     cache := snif.macs[m.mac]
-    cache.notified = false // switch off the flag if MAC apears
 
     if cache.first_time == 0 {
         snif.New_macs ++
@@ -234,11 +233,13 @@ func (m captured_MAC) store() (bool, error) { // m is the data from packet!
         log.Trace(cache.sensor_id," - The NEW MAC stored in cache: ",cache.mac)
         new = true  
     } else {
-        cache.update_time = time.Now().UnixNano()
         cache.channel = m.channel
         cache.src_ip = m.src_ip
     }
     
+    cache.notified = false // switch off the flag if MAC apears
+    cache.update_time = time.Now().UnixNano()    
+
     if m.position == 2 {
         if m.RSSI_current != 127 {
             cache.RSSI_sum = cache.RSSI_sum + m.RSSI_current    

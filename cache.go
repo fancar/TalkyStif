@@ -238,7 +238,8 @@ func (m captured_MAC) store() (bool, error) { // m is the data from packet!
     }
     
     cache.notified = false // switch off the flag if MAC apears
-    cache.update_time = time.Now().UnixNano()    
+    //cache.update_time = time.Now().UnixNano()    
+    cache.update_time = time.Now().Unix()
 
     if m.position == 2 {
         if m.RSSI_current != 127 {
@@ -299,6 +300,7 @@ type captured_snif struct {
     Update_time int64               `json:"ts_last"`
     Badsnif bool                    `json:"badsnif"`
     macs map[string]captured_MAC    `json:"-"`
+    Macs_cached int                 `json:"macs_cached"` 
     New_macs int64                  `json:"new_macs"`
     Post_macs int64                 `json:"post_macs"`
 }
@@ -323,7 +325,8 @@ func (new captured_snif) store() (bool, error) { // m is the data from packet!
     cache.Packets_total ++
     cache.Packets_period ++
 
-    cache.Update_time = time.Now().UnixNano()
+    //cache.Update_time = time.Now().UnixNano()
+    cache.Update_time = time.Now().Unix()
 
 /* other here */
 

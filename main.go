@@ -34,7 +34,7 @@ var (
     packets_count int64 // packets have been counted in post_period
     macs_discovered,macs_notified,macs_discovered_total,macs_notified_total int64
 
-    //frame types to ignore
+    //802.11 frame types to ignore
     ignore_frames = map[string]bool{
         "MgmtBeacon": true,
         "MgmtProbeResp": true,
@@ -56,7 +56,7 @@ var (
         "unavailable": true,
     }
 
-    //flags to ignore
+    // 802.11 flags to ignore
     ignore_flags = map[string]bool{
         "FROM-DS": true,
     }
@@ -378,6 +378,7 @@ func MacIsFine(mac net.HardwareAddr) bool {
 }
 
 type MainStats struct {
+    Version int              `json:"version"`
     NumCPU int              `json:"NumCPU"`
     Snifs int               `json:"snifs"`
     Goroutines int          `json:"goroutines"`
@@ -411,6 +412,7 @@ func CollectStats() MainStats {
     v, _ := mem.VirtualMemory()
     st_p := atomic.LoadInt64(&stats_period)
 
+    //s.Version = 
     s.NumCPU = numcpu
     s.Snifs = CountSnifs()
     s.Goroutines = runtime.NumGoroutine()
@@ -496,12 +498,14 @@ func cache_handler() {
             if sn.Update_time != 0 {
                 st_p := atomic.LoadInt64(&post_period)
 
-                sn.Pps = sn.Packets_period / st_p + 1
+                sn.Pps = sn.Packets_period / st_p // + 1
+
+                macs_cached := len(sn.macs)
 
                 log.WithFields(logrus.Fields{
                 "snifid": sn.Id,
                 "snifip": sn.Ip,
-                "macs": len(sn.macs),
+                "macs_cached": macs_cached,
                 "packets": sn.Packets_period,
                 "p_total": sn.Packets_total,
                 "pps": sn.Pps,
@@ -511,13 +515,15 @@ func cache_handler() {
                 sn.Packets_period = 0
                 
                 sn.New_macs = 0
-                sn.Post_macs = 0                
+                sn.Post_macs = 0
+                sn.Macs_cached = macs_cached             
 
                 for i,vi := range sn.macs {
 
                     if !vi.notified { // vi.notif_time < time.Now().Unix() && !vi.notified
                         // append to notif_list the mac
-                        t := strconv.FormatInt(vi.update_time/1e9, 10)
+                        t := strconv.FormatInt(vi.update_time, 10)
+                        //t := strconv.FormatInt(vi.update_time/1e9, 10)
                         
                         var rssi_avg int64 = -127
                         if vi.count_as_addr2 > 0 {rssi_avg = vi.RSSI_sum / vi.count_as_addr2}
@@ -582,7 +588,7 @@ func cache_handler() {
                         "first_time" : vi.first_time,
                         "sent" :vi.notified,
                         "sent_count": vi.notified_count,
-                        }).Trace("MAC inactive. Removed from cache")
+                        }).Trace("An old MAC has been Removed from cache:")
                     }
                 }
                 cache_map[j] = sn
@@ -601,7 +607,7 @@ func cache_handler() {
         for i,vi := range AP_cache {
             if vi.remove_time != 0 && vi.remove_time < now_u {
             	delete(AP_cache, i)
-            	log.Trace("REMOVED AP from cache:",vi.mac) 
+            	log.Trace("The AP has been REMOVED from cache (timeout):",vi.mac) 
             }
         }
 

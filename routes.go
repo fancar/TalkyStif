@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"github.com/gorilla/mux"
 	"encoding/json"
-
+	"net/http/pprof"
 //	"../middleware"
 	//"../models"
 	// "../sessions"
@@ -24,8 +24,15 @@ func NewRouter() *mux.Router {
 	r.HandleFunc("/info", AuthRequired(infoGetHandler)).Methods("GET")
 	r.HandleFunc("/sniffers", AuthRequired(SniffersGetHandler)).Methods("GET")
 	//r.HandleFunc("/sniffers", SniffersGetHandler).Methods("GET")
+	
 
 	r.HandleFunc("/login", loginGetHandler).Methods("GET")
+
+	// pprof debug
+
+	//r.HandleFunc("/debug/pprof", pprof.Profile)
+	r.PathPrefix("/debug/pprof/").HandlerFunc(pprof.Index)
+
 	//r.HandleFunc("/login", loginPostHandler).Methods("POST")
 	//r.HandleFunc("/logout", logoutGetHandler).Methods("GET")
 	//r.HandleFunc("/register", registerGetHandler).Methods("GET")

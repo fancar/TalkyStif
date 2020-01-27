@@ -20,12 +20,18 @@ import (
     "sync"
     "sync/atomic"
    // "reflect"
-   //"fmt"    
+   //"fmt"
+   
+)
+
+const (
+    ouiFileName string = "oui.txt"
+    httpserver_ip_port string = "0.0.0.0:8087"
 )
 
 var (
     mutex = &sync.Mutex{}    
-    ouiFileName string = "oui.txt"
+    
     //ouiDBrenew_hours time.Duration  = 1 // when file expire hours
     ouiDBrenew_period time.Duration // when file expire we are going to download newone
     //FilterByVendor bool = false
@@ -96,14 +102,17 @@ func main() {
         go handlePacket(conn, quit)
     }
 
-    r := NewRouter()
-    http.Handle("/", r)
-    log.Fatal(http.ListenAndServe("0.0.0.0:8087", nil))
-    
+    go runWebServer(httpserver_ip_port)
+
     <-quit // hang until an error
     log.Info("Exit")
 }
 
+func runWebServer(a string) {
+    r := NewRouter()
+    http.Handle("/", r)
+    go log.Fatal(http.ListenAndServe(a, nil))    
+}
 /* download a file from the internet */
 func DownloadFile(filepath string, url string) error {
     log.Info("downloading...",url)

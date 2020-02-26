@@ -39,9 +39,6 @@ var (
         snifs map[string]captured_snif
     }{snifs: make(map[string]captured_snif)} 
 
-	mac_remember_cache int64 = 300 // The MAC will be erased from cache after the time inactive
-    snif_remember_cache int64 = 2592000 // The snif will be erased from cache after the time inactive
-    badsnif_remember_cache int64 = 60
 )
 //                                   *** CAPTURED AP MACS CACHE ***
 
@@ -106,8 +103,8 @@ func (m *BadSnifStruct) dobby_is_free() bool {
 
 func (m *BadSnifStruct) update() { // m is the data from packet!
     cached := bad_snifs_cache.m[m.id()]
-    cached.update_time = now.UnixNano()
-    cached.remove_time = time.Now().Unix() + badsnif_remember_cache 
+    cached.update_time = time.Now().UnixNano()
+    cached.remove_time = time.Now().Unix() + CFG_CACHE_BADSNIF_TIMEOUT 
     //bad_snifs_cache.m[m.id()] = cached
 }
 
@@ -196,7 +193,7 @@ func (m captured_AP) store() (bool, error) {
     }
 
     cache.update_time = time.Now().UnixNano()
-    cache.remove_time = time.Now().Unix() + atomic.LoadInt64(&mac_remember_cache) 
+    cache.remove_time = time.Now().Unix() + atomic.LoadInt64(&CFG_CACHE_MAC_TIMEOUT) 
     captured_AP_cache.m[m.id()] = cache
 
     return result, nil
@@ -319,7 +316,7 @@ func (new captured_snif) store() (bool, error) { // m is the data from packet!
         result = true
     }
     if cache.Ip != new.Ip  {
-        log.Warning("%s: ip is changed: (old:%snew%s)",cache.Id,cache.Ip,new.Ip)
+        log.Warning("%s: ip has changed: (old:%snew%s)",cache.Id,cache.Ip,new.Ip)
         cache.Ip = new.Ip
     }
     cache.Packets_total ++

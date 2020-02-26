@@ -17,28 +17,20 @@ import (
     "encoding/json"
     "net/http"
     "bytes"
-    "sync"
+    //"sync"
     "sync/atomic"
    // "reflect"
    //"fmt"
    
 )
 
-const (
-    ouiFileName string = "oui.txt"
-    httpserver_ip_port string = "0.0.0.0:8087"
-)
 
 var (
-    mutex = &sync.Mutex{}    
+    //mutex = &sync.Mutex{}    
     
     //ouiDBrenew_hours time.Duration  = 1 // when file expire hours
-    ouiDBrenew_period time.Duration // when file expire we are going to download newone
     //FilterByVendor bool = false
-    check_all_macs bool = false
-    
-    packets_count int64 // packets have been counted in post_period
-    macs_discovered,macs_notified,macs_discovered_total,macs_notified_total int64
+    //check_all_macs bool = false
 
     //802.11 frame types to ignore
     ignore_frames = map[string]bool{
@@ -69,34 +61,22 @@ var (
 )     
 
 func main() {
-    log.Info(Version," has just started")
-    flags()
-    ouiDBrenew_period = time.Duration(oui_period) * time.Hour
-    logging(log_file)
-
     quit := make(chan struct{})
-    //goahead := make(chan bool)
+    Init()
 
     err := MakeOuidb(ouiFileName)
-    if err != nil {
-        log.Error("You can try to place the file manually: ",ouiFileName)
-        os.Exit(1)
-    } else { tzspanalyser.OpenOuiDb(ouiFileName)  }
-    //log.Info(tzspanalyser.OUI_db)
+    ErrorAndExit("Can't init OUI Database",err)
 
     ServerAddr,err := net.ResolveUDPAddr(proto_db,port_db)
     ErrorAndExit("can't resolve udp",err)    
     conn, err := net.ListenUDP("udp", ServerAddr)
     ErrorAndExit("Can't listen UDP port",err)
-    
-    start_time = time.Now()
-    start_time_u = time.Now().Unix()
 
     log.Info("Waiting for TZSP flows...")
 
     go print_stats()
     go cache_handler()
-    go UpdateOuidb()
+    go OuidbUpdater()
 
     for i := 0; i < runtime.NumCPU(); i++ {
         go handlePacket(conn, quit)
@@ -115,21 +95,21 @@ func runWebServer(a string) {
 }
 /* download a file from the internet */
 func DownloadFile(filepath string, url string) error {
-    log.Info("downloading...",url)
-    // Get the data
+    log.Info("...downloading file from ",url)
+    
     resp, err := http.Get(url)
-    ErrorAndExit("can't get http url",err)    
-
+    if err != nil {
+        //log.Error("can't make get request: ",err)
+        return err
+    }
     defer resp.Body.Close()
 
-    // Create the file
     out, err := os.Create(filepath)
     if err != nil {
         return err
     }
     defer out.Close()
 
-    // Write the body to file
     _, err = io.Copy(out, resp.Body)
     return err
 }
@@ -147,55 +127,61 @@ func WeNeedNewFile(fname string) bool{
     now := time.Now()
     diff := now.Sub(file.ModTime())
     
-    if diff > ouiDBrenew_period {      
-        log.Info("oui-DB: renew period: ",ouiDBrenew_period,oui_period)
+    if diff > OUI_RENEW_TIMEDURATION {      
+        log.Info("oui-DB: renew period: ",OUI_RENEW_TIMEDURATION)
         log.Info("oui-DB: the file is old: ",file.ModTime())
         return true
-    } else {
-        return false
     }
+    return false
 }
 
 
 /* The func downloads vendor's database from the internet */
 func DownloadOui(fname string) error {
 
-    err := DownloadFile(fname, ouiFileUrl)
+    err := DownloadFile(fname, CFG_OUI_URL)
     if err == nil {
         log.Info("oui-DB: Adding new OUI database from ",fname)
-        tzspanalyser.OpenOuiDb(fname)        
+        err = tzspanalyser.OpenOuiDb(fname)      
     }
     return err
    
 }
 
+/* try to open database file, download if need */
 func MakeOuidb(fname string) error {
 
     if _, err_ := os.Stat(fname); os.IsNotExist(err_) {
         //ErrorAndExit("cant find file",err)  
-        log.Info("oui-DB: the local file not found")
+        log.Warning("oui-DB: the local file not found")
         err := DownloadOui(fname)
         if  err != nil {
             log.Error("oui-DB: can not download oui database file",err)
             return err
         }
-        
+
     } else {
-        if WeNeedNewFile(fname) {
-            err := DownloadOui(fname)
-            if err != nil {
-                log.Error("oui-DB: can not download new oui database file",err)    
-            }            
-        } 
-        }
+        err := tzspanalyser.OpenOuiDb(fname)
+        return err
+        UpdateOuidb(fname)
+    }
     return nil
 }
 
-/* The go func updates vendors database from the internet */
-func UpdateOuidb() { 
+func UpdateOuidb(fname string) {
+    if WeNeedNewFile(fname) {
+        err := DownloadOui(fname)
+        if err != nil {
+            log.Error("oui-DB: can not download new oui database file",err)    
+        }            
+    }
+}
+
+/* The goroutine updates vendors database from the internet */
+func OuidbUpdater() { 
     for {
-        MakeOuidb(ouiFileName)
-        time.Sleep(ouiDBrenew_period)
+        UpdateOuidb(ouiFileName)
+        time.Sleep(OUI_RENEW_TIMEDURATION)
     }
     //quit <- struct{}{}
 }
@@ -210,6 +196,7 @@ func handlePacket(conn *net.UDPConn , quit chan struct{}) {
 
     for err_ == nil {
         l, udp, err_ = conn.ReadFromUDP(buf)
+        //start_ := time.Now()
         
         atomic.AddInt64(&packets_count, 1) //packets_count ++
 
@@ -234,7 +221,7 @@ func handlePacket(conn *net.UDPConn , quit chan struct{}) {
         //p, err := tzsp.Parse(b)
         if err != nil {
             log.Error(udp.IP.String()+": error while parsing TZSP: ",err)
-            log.Trace("The umber of bad sniffers: ",len(bad_snifs_cache.m))
+            log.Trace("The number of bad sniffers: ",len(bad_snifs_cache.m))
             //time.Sleep(timewait * time.Second) 
             bad_snifs_cache.Lock()
             CacheBadSnif(junk_snif)
@@ -242,15 +229,16 @@ func handlePacket(conn *net.UDPConn , quit chan struct{}) {
             continue
         }
         
-        if !snif_is_active(tzsp["sensor_id"].(string),udp.IP.String()) {
-            break
+        if !snif_counters(tzsp["sensor_id"].(string),udp.IP.String()) {
+            continue
         }
 
         Raw_fr := tzsp["dot11header"].([]byte)
         Dot11,err := tzspanalyser.ParseDot11(Raw_fr)
 
         if err != nil {
-            log.Trace("Some warning while parsing dot11 layer: ",err)
+            //log.Trace("Some warning recieved while parsing 802.11 layer: ",Dot11)
+            log.Trace("Some warning recieved while parsing 802.11 layer:  ",err)
         }
 
         log.WithFields(logrus.Fields{
@@ -290,9 +278,10 @@ func handlePacket(conn *net.UDPConn , quit chan struct{}) {
     			if ap_cached(tzsp["sensor_id"].(string),mac.String()) { continue }
     			vendor := VendorName(mac)
 
-                // ignore some frame types , vendors and flags...
+                // ignore some frame types, vendors and flags...
                 flags := strings.Split(Dot11.Flags.String(), ",")
     			//if !ignore_frames[Dot11.Type.String()] &&
+
                 if !ignore_vendors[vendor] &&
                    !ignore_flags[flags[0]] {
 
@@ -314,8 +303,13 @@ func handlePacket(conn *net.UDPConn , quit chan struct{}) {
     	            RSSI_current: tzsp["RSSI"].(int64)}
 
     	        	CacheMac(c)
+                  
     			}
     		}
+                    // s := fmt.Sprintf("PacketHandler: real mac: %s took: %s ",
+                    //     mac,time.Since(start_))
+                    // log.Info(s)  
+
     	}	    	
     	    
     }
@@ -324,13 +318,13 @@ func handlePacket(conn *net.UDPConn , quit chan struct{}) {
     quit <- struct{}{}
 }   
 
-/* just mark the sniffer as active (for counter) */
-func snif_is_active(mac string,ip string) bool {
+/* just make counters for the sniffer */
+func snif_counters(mac string,ip string) bool {
     s := captured_snif{Id:mac,Ip:ip}
 
     _,err := SaveItInCache(s) 
     if err != nil {
-        log.Trace("Error while saving SNIF in cache: ",err)
+        log.Error("Can not save SNIF in cache: ",err)
         return false
     }
     return true
@@ -339,10 +333,9 @@ func snif_is_active(mac string,ip string) bool {
 func CacheMac(c captured_MAC) {
 
     it_is_new,err := SaveItInCache(c) 
-    if err != nil {log.Trace("Error while saving MAC in cache:",err)}
+    if err != nil {log.Error("Error while saving MAC in cache:",err)}
 
     if it_is_new {
-        
         log.Trace("New mac saved in cache:",c.mac," ",c.vendor)
         atomic.AddInt64(&macs_discovered, 1) // macs_discovered ++
         atomic.AddInt64(&macs_discovered_total, 1) // macs_discovered_total ++
@@ -387,7 +380,7 @@ func MacIsFine(mac net.HardwareAddr) bool {
 }
 
 type MainStats struct {
-    Version int              `json:"version"`
+    Version string          `json:"version"`
     NumCPU int              `json:"NumCPU"`
     Snifs int               `json:"snifs"`
     Goroutines int          `json:"goroutines"`
@@ -413,15 +406,15 @@ type CombinedStats struct {
 }
 
 /* build statistics for logs and POST */
-func CollectStats() MainStats {
+func CollectStats(version string) MainStats {
     s := MainStats{}
     load, _ := load.Avg()
     numcpu := runtime.NumCPU()
     time_now := time.Now().Unix()
     v, _ := mem.VirtualMemory()
-    st_p := atomic.LoadInt64(&stats_period)
+    st_p := atomic.LoadInt64(&CFG_STATS_PERIOD)
 
-    //s.Version = 
+    s.Version = version
     s.NumCPU = numcpu
     s.Snifs = CountSnifs()
     s.Goroutines = runtime.NumGoroutine()
@@ -429,7 +422,7 @@ func CollectStats() MainStats {
     s.Timestamp = time_now
     s.Mem_usage = int(v.UsedPercent)
     s.Load_prcnt = int(load.Load1 * 100 / float64(numcpu))
-    s.Period = atomic.LoadInt64(&stats_period)
+    s.Period = atomic.LoadInt64(&CFG_STATS_PERIOD)
     s.Load_1m = load.Load1
     s.Load_5m = load.Load5
     s.Load_15m = load.Load15
@@ -460,14 +453,14 @@ func Logrus_fields(s MainStats) logrus.Fields {
 
 
 /* POST statiscics and log it from time to time
-stats_period var (logtime parameter)
+CFG_STATS_PERIOD var (logtime parameter)
  */
 func print_stats() {
+    ver := version
     for {
         
-        stat := CollectStats()
+        stat := CollectStats(ver)
         snifs := GetSnifs()
-
         data := CombinedStats{ Main : stat, Snifs : snifs, }
 
         logfields := Logrus_fields(stat)
@@ -478,7 +471,7 @@ func print_stats() {
         main_cache.Lock() 
         j, _ := json.Marshal(data)
         main_cache.Unlock()
-        PostJson(j,STATS_URL)
+        PostJson(j,CFG_STATS_URL)
 
         //reset counters
         atomic.SwapInt64(&macs_discovered, 0)
@@ -499,17 +492,19 @@ func cache_handler() {
 
         //notif_list := make(map[string][]interface{})
         notif_list := []interface{}{}
+        var macs_total int // total amount of macs
 
         main_cache.Lock()
         cache_map := main_cache.snifs
 
         for j,sn := range cache_map {
             if sn.Update_time != 0 {
-                st_p := atomic.LoadInt64(&post_period)
+                st_p := atomic.LoadInt64(&CFG_NOTIF_PERIOD)
 
                 sn.Pps = sn.Packets_period / st_p // + 1
 
                 macs_cached := len(sn.macs)
+                macs_total += macs_cached
 
                 log.WithFields(logrus.Fields{
                 "snifid": sn.Id,
@@ -519,7 +514,7 @@ func cache_handler() {
                 "p_total": sn.Packets_total,
                 "pps": sn.Pps,
                 }).Debug(  //Trace
-                "a sniffer statistics")
+                "snif-statistics")
 
                 sn.Packets_period = 0
                 
@@ -584,7 +579,7 @@ func cache_handler() {
                         sn.macs[i] = vi
                     }
 
-                    if vi.update_time + atomic.LoadInt64(&mac_remember_cache) < time.Now().Unix() {
+                    if vi.update_time + atomic.LoadInt64(&CFG_CACHE_MAC_TIMEOUT) < time.Now().Unix() {
                         delete(sn.macs, i)
 
                         log.WithFields(logrus.Fields{
@@ -605,7 +600,9 @@ func cache_handler() {
         }
 
         //captured_macs_cache.m = cache_map
-        //log.Debug("Cache len %s post_macs took: %s ",len(cache_map), time.Since(start))
+        // s := fmt.Sprintf("Cache: snifs:%d,macs:%d took: %s ",
+        //     len(cache_map),macs_total,time.Since(start))
+        // log.Info(s)
         main_cache.Unlock()
 
         
@@ -614,7 +611,7 @@ func cache_handler() {
         captured_AP_cache.Lock()
         AP_cache := captured_AP_cache.m
         for i,vi := range AP_cache {
-            if vi.remove_time != 0 && vi.remove_time < now_u {
+            if vi.remove_time != 0 && vi.remove_time < time.Now().Unix() {
             	delete(AP_cache, i)
             	log.Trace("The AP has been REMOVED from cache (timeout):",vi.mac) 
             }
@@ -623,8 +620,7 @@ func cache_handler() {
         captured_AP_cache.m = AP_cache
         captured_AP_cache.Unlock()
 
-
-        time.Sleep(time.Duration(atomic.LoadInt64(&post_period) * 1000) * time.Millisecond)
+        time.Sleep(time.Duration(atomic.LoadInt64(&CFG_NOTIF_PERIOD) * 1000) * time.Millisecond)
     }
 }
 
@@ -639,9 +635,8 @@ func PostJson(jsonValue []byte, url string) {
 
     //req.Header.Set("X-Custom-Header", "myvalue")
     req.Header.Set("Content-Type", "application/json")
-    if TOKEN != "" {
-        BEARER_TOKEN := "Bearer " + TOKEN
-        req.Header.Add("Authorization", BEARER_TOKEN)
+    if CFG_TOKEN != "" {
+        req.Header.Add("Authorization", "Bearer " + CFG_TOKEN)
     }
 
     client := &http.Client{}
@@ -661,26 +656,26 @@ func PostJson(jsonValue []byte, url string) {
 func PostMacList(list []interface{}) { // map[string][]interface{}
 
     jsonValue, _ := json.Marshal(list)
-    req, err := http.NewRequest("POST", NOTIF_URL, bytes.NewBuffer(jsonValue))
+    req, err := http.NewRequest("POST", CFG_NOTIF_URL, bytes.NewBuffer(jsonValue))
 
     if err != nil {
         log.WithFields(logrus.Fields{
-            "error": err, "server url": NOTIF_URL}).Error(
+            "error": err, "server url": CFG_NOTIF_URL}).Error(
             "Can not make notif http request. Bad URL? ")
     }
 
     //req.Header.Set("X-Custom-Header", "myvalue")
     req.Header.Set("Content-Type", "application/json")
-    if TOKEN != "" {
-        BEARER_TOKEN := "Bearer " + TOKEN
-        req.Header.Add("Authorization", BEARER_TOKEN)
+
+    if CFG_TOKEN != "" {
+        req.Header.Add("Authorization", "Bearer " + CFG_TOKEN)
     }
 
     client := &http.Client{}
     resp, err := client.Do(req)
     if err != nil {
         log.WithFields(logrus.Fields{
-            "error": err, "server url": NOTIF_URL}).Error(
+            "error": err, "server url": CFG_NOTIF_URL}).Error(
             "Can not send request to http server. ")
     } else {
     defer resp.Body.Close()

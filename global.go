@@ -18,7 +18,7 @@ var (
     log_file, loglevel,port_db, proto_db,NOTIF_URL,STATS_URL string
     TOKEN string
     BEARER_TOKEN string = "Bearer " + TOKEN
-    version string = "0.5.2 beta"
+    version string = "0.5.3 beta"
     Version string = "Talky Stif | TZSP colector with concurency | "+version
     
     log = logrus.New()

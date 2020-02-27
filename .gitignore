@@ -19,7 +19,7 @@ distr/*
 *.log.*
 
 #configuration
-#config.yaml
+config.yaml
 #config.ini
 
 #hotspot

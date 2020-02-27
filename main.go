@@ -118,15 +118,13 @@ func DownloadFile(filepath string, url string) error {
     log.Info("downloading...",url)
     // Get the data
     resp, err := http.Get(url)
-    ErrorAndExit("can't get http url",err)    
+    if err != nil { return err }
 
     defer resp.Body.Close()
 
     // Create the file
     out, err := os.Create(filepath)
-    if err != nil {
-        return err
-    }
+    if err != nil { return err }
     defer out.Close()
 
     // Write the body to file

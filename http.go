@@ -8,6 +8,12 @@ import (
 
 var Store = sessions.NewCookieStore([]byte("t0p-s3cr3t"))
 
+func runWebServer(a string) {
+    r := NewRouter()
+    http.Handle("/", r)
+    go log.Fatal(http.ListenAndServe(a, nil))    
+}
+
 func InternalServerError(w http.ResponseWriter) {
 	w.WriteHeader(http.StatusInternalServerError)
 	w.Write([]byte("Internal server error"))

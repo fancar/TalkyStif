@@ -48,6 +48,7 @@ var (
 
     //vendors to ignore
     ignore_vendors = map[string]bool{
+        "InfiNet LLC" : true,
         "D-LINK SYSTEMS, INC." : true,
         "D-Link International" : true,
         "Juniper Networks" : true,

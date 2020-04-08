@@ -23,7 +23,8 @@ import (
 
 
 var (
-    mac_to_send = make(chan captured_MAC)
+    mac_to_post = make(chan captured_MAC) // for POSTman
+    mac_to_produce = make(chan captured_MAC) // or kafka producer
     //mutex = &sync.Mutex{}    
     
     //ouiDBrenew_hours time.Duration  = 1 // when file expire hours
@@ -77,8 +78,13 @@ func main() {
     go print_stats()
     //go cache_handler()
     go OuidbUpdater()
-    go MACpostman()
 
+    if CFG_KAFKA_ENABLED {
+        go Kafka() // send macs via kafka producer
+    } else {
+        go MACpostman() // or http-post
+    }
+    
     for i := 0; i < runtime.NumCPU(); i++ {
         go handlePacket(conn, quit)
     }
@@ -96,6 +102,7 @@ sorry about the spagetti-length ;-)
 func handlePacket(conn *net.UDPConn , quit chan struct{}) {
     buf := make([]byte, 1024)
     l, udp, err_ := 0, new(net.UDPAddr), error(nil)
+
 
     for err_ == nil {
         l, udp, err_ = conn.ReadFromUDP(buf)
@@ -191,11 +198,18 @@ func MacHandler(c captured_MAC) {
     c,err := c.store()
     c.unlock()      
     if err != nil { log.Error("Can not save it in cache: ",c,err) }
-    //log.Debug("[MacHandler] mac to send: ",c.mac)
 
     if c.send_it {
-        mac_to_send <- c
+        log.Debug("[MacHandler] mac to send: ",c)
+        //choose channel to send via
+        if CFG_KAFKA_ENABLED {
+            mac_to_produce <- c
+        } else {
+            mac_to_post <- c
+        }
+        c.send_it = false
     }
+
 }
 
 /* returns vendor name by mac according to oui database */
@@ -367,7 +381,7 @@ func MACpostman() {
 
     for {
         ready_to_post := false
-        m := <-mac_to_send
+        m := <-mac_to_post
         data = append(data,m)
         log.Debug("[MACpostman] len(data):",len(data)," recieved mac: ",m.Mac)
 

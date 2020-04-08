@@ -15,6 +15,11 @@ const (
 )
 
 var (
+	//kafka
+	CFG_KAFKA_ENABLED bool = false
+	CFG_KAFKA_TOPIC string
+	CFG_KAFKA_SERVERS string
+
 	//urls
 	CFG_NOTIF_URL string
 	CFG_NOTIF_PERIOD int64 = 5
@@ -62,6 +67,11 @@ func ReadConfig(fname string) {
 	    }
 	    os.Exit(1)
 	}
+
+	//kafka settings
+	CFG_KAFKA_ENABLED = viper.GetBool("kafka.enabled")
+	CFG_KAFKA_TOPIC = viper.GetString("kafka.topic")
+	CFG_KAFKA_SERVERS = viper.GetString("kafka.servers")
 
 	//url settings
 	CFG_NOTIF_URL = viper.GetString("http-requests.captured-macs")

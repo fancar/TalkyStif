@@ -186,9 +186,10 @@ func (m captured_MAC) store() (captured_MAC, error) {
         cache = m
         cache.post_period = atomic.LoadInt64(&CFG_NOTIF_PERIOD)
         cache.First_time = time.Now().Unix()
-        cache.send_it = true // switch off the flag if MAC apears
+        cache.send_it = true // switch on the flag if MAC apears
     } else {
         cache.send_it = cache.time_to_send()
+        //log.Info(cache.Mac," - send_it value: ",cache.send_it)
         if cache.send_it { cache.Notified_count++ }
         cache.Channel = m.Channel
         cache.Src_ip = m.Src_ip

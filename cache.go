@@ -9,45 +9,21 @@ import (
 )
 
 var (
-    //bad_snifs_cache  = make(map[string]BadSnifStruct)
-
-    // active_sniffers = struct{
-    //     sync.RWMutex
-    //     m map[string]bool
-    // }{m: make(map[string]bool)}
 
     bad_snifs_cache = struct{
         sync.RWMutex
         m map[string]BadSnifStruct
     }{m: make(map[string]BadSnifStruct)}
-	//captured_AP_cache  = make(map[string]captured_AP)//cache for captured APs
-
-    // captured_AP_cache = struct{
-    //     sync.RWMutex
-    //     m map[string]captured_AP
-    // }{m: make(map[string]captured_AP)} 
-
-//    m map[string]captured_MAC
-    //cache for captured macs 
-	// captured_macs_cache = struct{
- //        sync.RWMutex
- //        m map[string]captured_MAC
- //    }{m: make(map[string]captured_MAC)} 
-
-    // main_cache = struct{
-    //     sync.RWMutex
-    //     snifs map[string]captured_snif
-    // }{snifs: make(map[string]captured_snif)} 
 
     snif_cache = struct{
         sync.RWMutex
         snifs map[string]captured_snif
     }{snifs: make(map[string]captured_snif)} 
 
-    mac_cache = struct{
-        sync.RWMutex
-        macs map[string]captured_MAC
-    }{macs: make(map[string]captured_MAC)}     
+    // mac_cache = struct{
+    //     sync.RWMutex
+    //     macs map[string]captured_MAC
+    // }{macs: make(map[string]captured_MAC)}     
 
 )
 
@@ -84,7 +60,8 @@ type captured_MAC struct {
 
 
 /* structure of cache for captured MACs */
-type captured_snif struct { 
+type captured_snif struct {
+    macs map[string]captured_MAC    `json:"-"`
     Ip string                       `json:"ip"`
     Id string                       `json:"id"`    
     // Pps int64                       `json:"pps"`
@@ -176,19 +153,22 @@ func (m *BadSnifStruct) save() {
 /* store/append mac-cache with data from packet,
 returns 'notified' boolean state */
 func (m captured_MAC) store() (captured_MAC, error) {
-    cache := mac_cache.macs[m.Mac]
+    snif := snif_cache.snifs[m.Sensor_id]
+    cache := snif.macs[m.Mac]
+    // cache := mac_cache.macs[m.Mac]
 
     if cache.First_time == 0 {
         cache.Notified_count = 1
         atomic.AddInt64(&macs_discovered, 1)
         atomic.AddInt64(&macs_discovered_total, 1)
-        log.Trace(m.Sensor_id," - The NEW MAC stored in cache: ",m.Mac)
-        SnifMacsCount(m.Sensor_id) // macs counter
+        snif.Macs_cnt ++
         cache = m
         cache.post_period = atomic.LoadInt64(&CFG_NOTIF_PERIOD)
         cache.First_time = time.Now().Unix()
         cache.send_it = true // switch on the flag if MAC apears
+        log.Debug(m.Sensor_id," - NEW MAC stored in cache: ",m)
     } else {
+        log.Debug(m.Sensor_id," - Existing MAC cache: ",cache)
         cache.send_it = cache.time_to_send()
         //log.Info(cache.Mac," - send_it value: ",cache.send_it)
         if cache.send_it { cache.Notified_count++ }
@@ -206,9 +186,12 @@ func (m captured_MAC) store() (captured_MAC, error) {
     } 
 
     cache.Frames_count++
-
-    mac_cache.macs[m.Mac] = cache
-    //main_cache.snifs[m.sensor_id].macs[m.mac] = cache
+    
+    // mac_cache.macs[m.Mac] = cache
+    // snif_cache.snifs[m.Sensor_id].macs[m.Mac] = cache
+    snif.macs[m.Mac] = cache
+    log.Debug("[cache store] here we go!!! ")
+    snif_cache.snifs[m.Sensor_id] = snif
 
     return cache, nil
 
@@ -220,11 +203,11 @@ func (m captured_MAC) time_to_send() bool {
 }
 
 func (m captured_MAC) lock() {
-    mac_cache.Lock()
+    snif_cache.Lock()
 }
 
 func (m captured_MAC) unlock() {
-    mac_cache.Unlock()    
+    snif_cache.Unlock()    
 
 }
 
@@ -263,14 +246,6 @@ func (m captured_snif) unlock() {
 
 }
 
-/* new macs counter for particula snif */
-func SnifMacsCount(id string) {
-    snif_cache.Lock()
-    s := snif_cache.snifs[id]
-    s.Macs_cnt++
-    snif_cache.snifs[id] = s
-    snif_cache.Unlock()  
-}
 
 // /* reset counters */
 // func ResetCountersForSnif(id string) {
@@ -293,13 +268,6 @@ func CountSnifs() int {
     snif_cache.Lock()
     result := len(snif_cache.snifs)
     snif_cache.Unlock()
-    return result
-}
-
-func CountMacs() int {
-    mac_cache.Lock()
-    result := len(mac_cache.macs)
-    mac_cache.Unlock()
     return result
 }
 

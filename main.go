@@ -171,10 +171,7 @@ func handlePacket(conn *net.UDPConn , quit chan struct{}) {
 
     	        	go MacHandler(c)
     			}
-    		}
-                    // s := fmt.Sprintf("PacketHandler: real mac: %s took: %s ",
-                    //     mac,time.Since(start_))
-                    // log.Info(s)  
+    		} 
     	}	    	
     }
     log.Error("UDP port listen error:",err_)
@@ -198,22 +195,18 @@ func snif_counters(mac string,ip string) bool {
 func MacHandler(c captured_MAC) {
     c.lock()
     c,err := c.store()
-    c.unlock()      
+    log.Debug("[MacHandler] here! ")
+    c.unlock()
+
     if err != nil { log.Error("Can not save it in cache: ",c,err) }
 
     if c.send_it {
         msg := fmt.Sprintf("snif: %s mac to send: %s", c.Src_ip,c.Mac)
         log.Debug("[MacHandler] ",msg)
 
-        //choose channel to send via
-        mac_to_produce <- c
-        mac_to_post <- c
+        mac_to_produce <- c // kafka
+        mac_to_post <- c // local storage
 
-        // if CFG_KAFKA_ENABLED {
-        //     mac_to_produce <- c
-        // } else {
-        //     mac_to_post <- c
-        // }
         c.send_it = false
     }
 
@@ -256,7 +249,6 @@ type MainStats struct {
     Load_5m float64         `json:"load_5m"`
     Load_15m float64        `json:"load_15m"`
     Snifs_cached int        `json:"snifs_cached"`
-    Macs_cached int        `json:"macs_cached"`
     Macs_discovered int64       `json:"macs_discovered"`
     Macs_discovered_total int64 `json:"macs_discovered_total"`
     Macs_sent int64         `json:"macs_sent"`
@@ -311,7 +303,6 @@ func CollectStats(version string) MainStats {
     s.Post_errors_count = atomic.LoadInt64(&post_errors_count)
     s.Post_errors_count_total = atomic.LoadInt64(&post_errors_count_total)
 
-    s.Macs_cached = CountMacs()
     //s.Uptime = time.Since(start_time)
     s.Uptime = time_now - start_time.Unix()
 
@@ -401,7 +392,7 @@ func PostJson(jsonValue []byte, url string) {
     defer resp.Body.Close()    
     log.Debug("[PostJson] Response Status:'", resp.Status)
 
-    if resp.StatusCode >= 200 && resp.StatusCode <= 299 {
+    if resp.StatusCode >= 200 && resp.StatusCode < 300 {
         atomic.AddInt64(&post_count, 1)
         atomic.AddInt64(&post_count_total, 1)
     } else {

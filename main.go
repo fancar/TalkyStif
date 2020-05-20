@@ -74,6 +74,12 @@ func main() {
     ErrorAndExit("Can't listen UDP port",err)
 
     log.Info("Waiting for TZSP flows...")
+    
+    for i := 0; i < runtime.NumCPU(); i++ {
+        go handlePacket(conn, quit)
+    }
+
+    go runWebServer(httpserver_ip_port)
 
     go print_stats()
     //go cache_handler()
@@ -82,17 +88,6 @@ func main() {
     go Kafka()
     go MACpostman()
 
-    // if CFG_KAFKA_ENABLED {
-    //     go Kafka() // send macs via kafka
-    // } else {
-    //     go MACpostman() // or http-post
-    // }
-    
-    for i := 0; i < runtime.NumCPU(); i++ {
-        go handlePacket(conn, quit)
-    }
-
-    go runWebServer(httpserver_ip_port)
 
     <-quit // hang until an error
     log.Info("Exit")
@@ -195,7 +190,6 @@ func snif_counters(mac string,ip string) bool {
 func MacHandler(c captured_MAC) {
     c.lock()
     c,err := c.store()
-    log.Debug("[MacHandler] here! ")
     c.unlock()
 
     if err != nil { log.Error("Can not save it in cache: ",c,err) }
@@ -336,17 +330,20 @@ func print_stats() {
     for {
         
         stat := CollectStats(ver)
-        snifs := GetSnifs()
+        // snifs := GetSnifs()
+        snif_cache.Lock()
+        snifs := snif_cache.snifs
         stat.Snifs_cached = len(snifs)
         data := CombinedStats{ Main : stat, Snifs : snifs, }
 
         logfields := Logrus_fields(stat)
 
         log.WithFields(logfields).Info(  //Trace
-            "statistics for ",stat.Period," seconds:")
+            "statistics for ",stat.Period," seconds")
 
         //main_cache.Lock() 
         j, _ := json.Marshal(data)
+        snif_cache.Unlock()
         //main_cache.Unlock()
 
         //reset counters
@@ -419,14 +416,15 @@ func MACpostman() {
         ready_to_post := false
         m := <-mac_to_post
         data = append(data,m)
-        log.Debug("[MACpostman] current data len:",len(data)," new mac to send: ",m.Mac)
+        f := logrus.Fields{"mac-to-send":m.Mac,"len":len(data)}
+        log.WithFields(f).Debug("[MACpostman] prepeared mac to send")
 
         if len(data) > max_macs+1 {
-            log.Debug("[MACpostman] A lot of rows! Have to send it now! MACS to POST: ",len(data))
+            log.Debug("[MACpostman] sending macs. Len:",len(data))
             ready_to_post = true
         } else {
             if time.Now().Unix() > post_time + duration {
-                log.Debug("[MACpostman] It's time to send some data. MACS to POST: ",len(data))
+                log.Debug("[MACpostman] sending macs by time. Len:",len(data))
                 ready_to_post = true           
             }
         }

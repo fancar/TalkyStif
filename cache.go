@@ -1,6 +1,7 @@
 package main
 
 import (
+    "github.com/sirupsen/logrus"
     "time"
 	//"fmt"
     //"reflect"
@@ -64,13 +65,13 @@ type captured_snif struct {
     macs map[string]captured_MAC    `json:"-"`
     Ip string                       `json:"ip"`
     Id string                       `json:"id"`    
-    // Pps int64                       `json:"pps"`
-    Packets_total int64             `json:"total_cnt"`
     Packets_period int64            `json:"pct_cnt"`
     First_time int64                `json:"ts_first"`
     Update_time int64               `json:"ts_last"`
     Badsnif bool                    `json:"badsnif"`
     Macs_cnt int64                  `json:"macs_cnt"`
+    // Pps int64                       `json:"pps"`
+    // Packets_total int64             `json:"total_cnt"`    
     // New_macs int64                  `json:"new_macs"`
     // macs map[string]captured_MAC    `json:"-"`
     // Macs_cached int                 `json:"macs_cached"` 
@@ -166,9 +167,8 @@ func (m captured_MAC) store() (captured_MAC, error) {
         cache.post_period = atomic.LoadInt64(&CFG_NOTIF_PERIOD)
         cache.First_time = time.Now().Unix()
         cache.send_it = true // switch on the flag if MAC apears
-        log.Debug(m.Sensor_id," - NEW MAC stored in cache: ",m)
+        log.WithFields(logrus.Fields{"snif":m.Sensor_id,"mac":m.Mac}).Debug("[CACHE] New MAC stored")
     } else {
-        log.Debug(m.Sensor_id," - Existing MAC cache: ",cache)
         cache.send_it = cache.time_to_send()
         //log.Info(cache.Mac," - send_it value: ",cache.send_it)
         if cache.send_it { cache.Notified_count++ }
@@ -190,7 +190,6 @@ func (m captured_MAC) store() (captured_MAC, error) {
     // mac_cache.macs[m.Mac] = cache
     // snif_cache.snifs[m.Sensor_id].macs[m.Mac] = cache
     snif.macs[m.Mac] = cache
-    log.Debug("[cache store] here we go!!! ")
     snif_cache.snifs[m.Sensor_id] = snif
 
     return cache, nil
@@ -219,14 +218,16 @@ func (new captured_snif) store() (captured_snif, error) { // m is the data from 
 
     if cache.First_time == 0 { // if new sniffer in cache
         cache = new
+        cache.macs = make(map[string]captured_MAC)
         cache.First_time = time.Now().Unix()
-        log.Debug(cache.Id,": the NEW Snif has been detected with ip: ",cache.Ip)
+        log.Trace(cache.Id,": the NEW Snif has been detected with ip: ",cache.Ip)
     }
     if cache.Ip != new.Ip  {
-        log.Warning("%s: ip has changed: (old:%snew%s)",cache.Id,cache.Ip,new.Ip)
+        f := logrus.Fields{"snif":cache.Id,"oldip":cache.Ip,"newip":new.Ip}
+        log.WithFields(f).Warning("[CACHE] ip has changed")
         cache.Ip = new.Ip
     }
-    cache.Packets_total ++
+    // cache.Packets_total ++
     cache.Packets_period ++
 
     //cache.Update_time = time.Now().UnixNano()

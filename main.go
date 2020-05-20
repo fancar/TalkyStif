@@ -18,13 +18,13 @@ import (
     //"sync"
     "sync/atomic"
    // "reflect"
-   //"fmt"
+   "fmt"
 )
 
 
 var (
-    mac_to_post = make(chan captured_MAC) // for POSTman
-    mac_to_produce = make(chan captured_MAC) // or kafka producer
+    mac_to_post = make(chan captured_MAC,44000) // for POSTs to localdb
+    mac_to_produce = make(chan captured_MAC,44000) // or kafka producer
     //mutex = &sync.Mutex{}    
     
     //ouiDBrenew_hours time.Duration  = 1 // when file expire hours
@@ -79,11 +79,14 @@ func main() {
     //go cache_handler()
     go OuidbUpdater()
 
-    if CFG_KAFKA_ENABLED {
-        go Kafka() // send macs via kafka producer
-    } else {
-        go MACpostman() // or http-post
-    }
+    go Kafka()
+    go MACpostman()
+
+    // if CFG_KAFKA_ENABLED {
+    //     go Kafka() // send macs via kafka
+    // } else {
+    //     go MACpostman() // or http-post
+    // }
     
     for i := 0; i < runtime.NumCPU(); i++ {
         go handlePacket(conn, quit)
@@ -174,7 +177,6 @@ func handlePacket(conn *net.UDPConn , quit chan struct{}) {
                     // log.Info(s)  
     	}	    	
     }
-
     log.Error("UDP port listen error:",err_)
     quit <- struct{}{}
 }   
@@ -200,13 +202,18 @@ func MacHandler(c captured_MAC) {
     if err != nil { log.Error("Can not save it in cache: ",c,err) }
 
     if c.send_it {
-        log.Debug("[MacHandler] mac to send: ",c)
+        msg := fmt.Sprintf("snif: %s mac to send: %s", c.Src_ip,c.Mac)
+        log.Debug("[MacHandler] ",msg)
+
         //choose channel to send via
-        if CFG_KAFKA_ENABLED {
-            mac_to_produce <- c
-        } else {
-            mac_to_post <- c
-        }
+        mac_to_produce <- c
+        mac_to_post <- c
+
+        // if CFG_KAFKA_ENABLED {
+        //     mac_to_produce <- c
+        // } else {
+        //     mac_to_post <- c
+        // }
         c.send_it = false
     }
 
@@ -249,10 +256,18 @@ type MainStats struct {
     Load_5m float64         `json:"load_5m"`
     Load_15m float64        `json:"load_15m"`
     Snifs_cached int        `json:"snifs_cached"`
+    Macs_cached int        `json:"macs_cached"`
     Macs_discovered int64       `json:"macs_discovered"`
     Macs_discovered_total int64 `json:"macs_discovered_total"`
     Macs_sent int64         `json:"macs_sent"`
     Macs_sent_total int64   `json:"macs_sent_total"`
+    Kafka_fail int64         `json:"kafka_fail"`
+    Kafka_fail_total int64   `json:"kafka_fail_total"`    
+    Post_count int64   `json:"post_count"` 
+    Post_count_total int64   `json:"post_count_total"`
+    Post_errors_count int64   `json:"post_errors_count"` 
+    Post_errors_count_total int64   `json:"post_errors_count_total"` 
+
     //Uptime int64 `json:"uptime"`
     Uptime int64            `json:"uptime_sec"`
 }
@@ -285,8 +300,18 @@ func CollectStats(version string) MainStats {
     s.Load_15m = load.Load15
     s.Macs_discovered = atomic.LoadInt64(&macs_discovered)
     s.Macs_discovered_total = atomic.LoadInt64(&macs_discovered_total)
+    // kafka
     s.Macs_sent = atomic.LoadInt64(&macs_notified)
     s.Macs_sent_total = atomic.LoadInt64(&macs_notified_total)
+    s.Kafka_fail = atomic.LoadInt64(&kafka_errors_count)
+    s.Kafka_fail_total = atomic.LoadInt64(&kafka_errors_count_total)
+    // http requests
+    s.Post_count = atomic.LoadInt64(&post_count)
+    s.Post_count_total = atomic.LoadInt64(&post_count_total)
+    s.Post_errors_count = atomic.LoadInt64(&post_errors_count)
+    s.Post_errors_count_total = atomic.LoadInt64(&post_errors_count_total)
+
+    s.Macs_cached = CountMacs()
     //s.Uptime = time.Since(start_time)
     s.Uptime = time_now - start_time.Unix()
 
@@ -303,6 +328,9 @@ func Logrus_fields(s MainStats) logrus.Fields {
         "mem"              : s.Mem_usage,
         "pps"              : s.Pps,
         "macs_sent"        : s.Macs_sent,
+        "send_fail"        : s.Kafka_fail,
+        "posts_fail"        : s.Post_errors_count,
+        "posts"        : s.Post_count,
         "macs_discovered"  : s.Macs_discovered,
     }
     return result
@@ -329,13 +357,16 @@ func print_stats() {
         //main_cache.Lock() 
         j, _ := json.Marshal(data)
         //main_cache.Unlock()
-        PostJson(j,CFG_STATS_URL)
 
         //reset counters
         atomic.SwapInt64(&macs_discovered, 0)
         atomic.SwapInt64(&packets_count, 0)
         atomic.SwapInt64(&macs_notified, 0)        
+        atomic.SwapInt64(&kafka_errors_count, 0)
+        atomic.SwapInt64(&post_count, 0)
+        atomic.SwapInt64(&post_errors_count, 0)
 
+        PostJson(j,CFG_STATS_URL)
         time.Sleep(time.Duration(stat.Period) * time.Second)
     }
 
@@ -349,7 +380,8 @@ func PostJson(jsonValue []byte, url string) {
     if err != nil {
         log.WithFields(logrus.Fields{
             "error": err, "server url": url}).Error(
-            "Can not make http request. Bad URL? ")
+            "Can not prepare http request. Bad URL? ")
+        return
     }
 
     //req.Header.Set("X-Custom-Header", "myvalue")
@@ -364,17 +396,30 @@ func PostJson(jsonValue []byte, url string) {
         log.WithFields(logrus.Fields{
             "error": err, "server url": url}).Error(
             "Can not send request to http server. ")
+        return
+    }
+    defer resp.Body.Close()    
+    log.Debug("[PostJson] Response Status:'", resp.Status)
+
+    if resp.StatusCode >= 200 && resp.StatusCode <= 299 {
+        atomic.AddInt64(&post_count, 1)
+        atomic.AddInt64(&post_count_total, 1)
     } else {
-        defer resp.Body.Close()    
-        log.Debug("Posted statistics. Response Status:'", resp.Status)
-    }         
+        log.Error("[PostJson] Response Status:'", resp.Status)
+        atomic.AddInt64(&post_errors_count, 1)
+        atomic.AddInt64(&post_errors_count_total, 1)
+    }
+        
 }
 
 
-/* the goroutine gets macs from 'ready_to_post' channel and sends it by http-post */
+/* temp legacy
+ the goroutine gets macs from 'ready_to_post'
+ channel and sends it by http-post
+*/
 func MACpostman() {
-    duration := atomic.LoadInt64(&CFG_NOTIF_PERIOD)
-    max_macs := 200 // max macs in json
+    duration := atomic.LoadInt64(&CFG_POST_PERIOD)
+    max_macs := 42 // max macs in json
     post_time := time.Now().Unix()
 
     data := []captured_MAC{}
@@ -383,21 +428,23 @@ func MACpostman() {
         ready_to_post := false
         m := <-mac_to_post
         data = append(data,m)
-        log.Debug("[MACpostman] len(data):",len(data)," recieved mac: ",m.Mac)
+        log.Debug("[MACpostman] current data len:",len(data)," new mac to send: ",m.Mac)
 
         if len(data) > max_macs+1 {
-            log.Debug("A lot of rows! Have to send now! MACS in POST: ",len(data))
+            log.Debug("[MACpostman] A lot of rows! Have to send it now! MACS to POST: ",len(data))
             ready_to_post = true
         } else {
             if time.Now().Unix() > post_time + duration {
-                log.Debug(" Time to send the data. MACS in POST: ",len(data))
+                log.Debug("[MACpostman] It's time to send some data. MACS to POST: ",len(data))
                 ready_to_post = true           
             }
         }
 
         if ready_to_post {
-            atomic.SwapInt64(&macs_notified, atomic.LoadInt64(&macs_notified)  + int64(len(data)))        
-            atomic.SwapInt64(&macs_notified_total, atomic.LoadInt64(&macs_notified_total)  + int64(len(data)))
+            if !CFG_KAFKA_ENABLED {
+                atomic.SwapInt64(&macs_notified, atomic.LoadInt64(&macs_notified)  + int64(len(data)))        
+                atomic.SwapInt64(&macs_notified_total, atomic.LoadInt64(&macs_notified_total)  + int64(len(data)))
+            }
 
             json,err := json.Marshal(data)
             if err != nil {
@@ -410,41 +457,3 @@ func MACpostman() {
         }
     }
 }
-
-
-
-// /* post new macs in cache as list */
-
-// func PostMacList(list []interface{}) { // map[string][]interface{}
-
-//     jsonValue, _ := json.Marshal(list)
-//     req, err := http.NewRequest("POST", CFG_NOTIF_URL, bytes.NewBuffer(jsonValue))
-
-//     if err != nil {
-//         log.WithFields(logrus.Fields{
-//             "error": err, "server url": CFG_NOTIF_URL}).Error(
-//             "Can not make notif http request. Bad URL? ")
-//     }
-
-//     //req.Header.Set("X-Custom-Header", "myvalue")
-//     req.Header.Set("Content-Type", "application/json")
-
-//     if CFG_TOKEN != "" {
-//         req.Header.Add("Authorization", "Bearer " + CFG_TOKEN)
-//     }
-
-//     client := &http.Client{}
-//     resp, err := client.Do(req)
-//     if err != nil {
-//         log.WithFields(logrus.Fields{
-//             "error": err, "server url": CFG_NOTIF_URL}).Error(
-//             "Can not send request to http server. ")
-//     } else {
-//     defer resp.Body.Close()
-
-//     atomic.SwapInt64(&macs_notified, atomic.LoadInt64(&macs_notified)  + int64(len(list)))        
-//     atomic.SwapInt64(&macs_notified_total, atomic.LoadInt64(&macs_notified_total)  + int64(len(list)))
-
-//     log.Debug("POST MAC-list. Response Status:'", resp.Status,"'. MACS sent:",len(list))//,
-//     }
-// }

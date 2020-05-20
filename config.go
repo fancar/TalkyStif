@@ -22,7 +22,8 @@ var (
 
 	//urls
 	CFG_NOTIF_URL string
-	CFG_NOTIF_PERIOD int64 = 5
+	CFG_NOTIF_PERIOD int64 = 5 // seconds 
+	CFG_POST_PERIOD int64 = 5 // how frequent to post if not many macs
 	CFG_STATS_URL string
 	CFG_STATS_PERIOD int64 = 60
 	CFG_TOKEN string
@@ -40,7 +41,10 @@ var (
 
     //counters
     packets_count int64 // packets have been counted in CFG_NOTIF_PERIOD of time
-    macs_discovered,macs_notified,macs_discovered_total,macs_notified_total int64    
+    macs_discovered,macs_notified,macs_discovered_total,macs_notified_total int64
+    kafka_errors_count, kafka_errors_count_total int64
+    post_count, post_count_total int64
+    post_errors_count, post_errors_count_total int64
 )
 
 
@@ -67,6 +71,8 @@ func ReadConfig(fname string) {
 	    }
 	    os.Exit(1)
 	}
+	// common settings
+	CFG_NOTIF_PERIOD = viper.GetInt64("macsend_period")
 
 	//kafka settings
 	CFG_KAFKA_ENABLED = viper.GetBool("kafka.enabled")
@@ -77,7 +83,8 @@ func ReadConfig(fname string) {
 	CFG_NOTIF_URL = viper.GetString("http-requests.captured-macs")
 	CFG_STATS_URL = viper.GetString("http-requests.statistics")
 	CFG_TOKEN = viper.GetString("http-requests.token")
-	CFG_NOTIF_PERIOD = viper.GetInt64("http-requests.macs_period")
+	
+	CFG_POST_PERIOD = viper.GetInt64("http-requests.post_period")
 	CFG_STATS_PERIOD = viper.GetInt64("http-requests.stats_period")
 
 	//logs

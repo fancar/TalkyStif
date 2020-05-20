@@ -5,14 +5,17 @@ import (
 	"fmt"
 	"gopkg.in/confluentinc/confluent-kafka-go.v1/kafka"
     "bytes"
-    "encoding/json"	
+    "encoding/json"
+    //"unsafe"
 )
 
 /* producer to bgdata garden */
 func Kafka() {
 	topic := CFG_KAFKA_TOPIC
 
-	p, err := kafka.NewProducer(&kafka.ConfigMap{"bootstrap.servers": CFG_KAFKA_SERVERS})
+	p, err := kafka.NewProducer(&kafka.ConfigMap{
+		"bootstrap.servers": CFG_KAFKA_SERVERS}) 
+		// "debug": "broker"})
 	if err != nil {
 		log.Error("[kafka] "+err.Error())
 		panic(err)
@@ -27,6 +30,8 @@ func Kafka() {
 			case *kafka.Message:
 				if ev.TopicPartition.Error != nil {
 					log.Error(fmt.Sprintf("[kafka] Delivery failed: %v\n", ev.TopicPartition))
+					atomic.AddInt64(&kafka_errors_count, 1)
+					atomic.AddInt64(&kafka_errors_count_total, 1)					
 				} else {
 					log.Debug(fmt.Sprintf("[kafka] Delivered message to: %v\n", ev.TopicPartition))
 					atomic.AddInt64(&macs_notified, 1)

@@ -87,16 +87,17 @@ type captured_MAC struct {
 type captured_snif struct { 
     Ip string                       `json:"ip"`
     Id string                       `json:"id"`    
-    Pps int64                       `json:"pps"`
+    // Pps int64                       `json:"pps"`
     Packets_total int64             `json:"total_cnt"`
     Packets_period int64            `json:"pct_cnt"`
     First_time int64                `json:"ts_first"`
     Update_time int64               `json:"ts_last"`
     Badsnif bool                    `json:"badsnif"`
-    //macs map[string]captured_MAC    `json:"-"`
-    Macs_cached int                 `json:"macs_cached"` 
-    New_macs int64                  `json:"new_macs"`
-    Post_macs int64                 `json:"post_macs"`
+    Macs_cnt int64                  `json:"macs_cnt"`
+    // New_macs int64                  `json:"new_macs"`
+    // macs map[string]captured_MAC    `json:"-"`
+    // Macs_cached int                 `json:"macs_cached"` 
+    // Post_macs int64                 `json:"post_macs"`
 }
 
 //                                   *** BADSNIF CACHE ***
@@ -181,8 +182,8 @@ func (m captured_MAC) store() (captured_MAC, error) {
         cache.Notified_count = 1
         atomic.AddInt64(&macs_discovered, 1)
         atomic.AddInt64(&macs_discovered_total, 1)
-        log.Trace(cache.Sensor_id," - The NEW MAC stored in cache: ",cache.Mac)
-        NewMacForSnif(cache.Sensor_id) //new macs counter
+        log.Trace(m.Sensor_id," - The NEW MAC stored in cache: ",m.Mac)
+        SnifMacsCount(m.Sensor_id) // macs counter
         cache = m
         cache.post_period = atomic.LoadInt64(&CFG_NOTIF_PERIOD)
         cache.First_time = time.Now().Unix()
@@ -248,8 +249,6 @@ func (new captured_snif) store() (captured_snif, error) { // m is the data from 
     //cache.Update_time = time.Now().UnixNano()
     cache.Update_time = time.Now().Unix()
 
-/* other here */
-
     snif_cache.snifs[cache.Id] = cache
     return cache, nil
 
@@ -264,14 +263,23 @@ func (m captured_snif) unlock() {
 
 }
 
-/* new macs counter */
-func NewMacForSnif(id string) {
+/* new macs counter for particula snif */
+func SnifMacsCount(id string) {
     snif_cache.Lock()
     s := snif_cache.snifs[id]
-    s.New_macs++
+    s.Macs_cnt++
     snif_cache.snifs[id] = s
-    snif_cache.Unlock()    
+    snif_cache.Unlock()  
 }
+
+// /* reset counters */
+// func ResetCountersForSnif(id string) {
+//     snif_cache.Lock()
+//     s := snif_cache.snifs[id]
+//     s.New_macs = 0
+//     snif_cache.snifs[id] = s
+//     snif_cache.Unlock()  
+// }
 
 /* stores data in cache. returns true if new */
 // func SaveItInCache(l cache_int) (bool,error) {
@@ -288,6 +296,12 @@ func CountSnifs() int {
     return result
 }
 
+func CountMacs() int {
+    mac_cache.Lock()
+    result := len(mac_cache.macs)
+    mac_cache.Unlock()
+    return result
+}
 
 /* output statistics as json */
 func GetSnifs() map[string]captured_snif {
@@ -299,7 +313,9 @@ func GetSnifs() map[string]captured_snif {
 
 
 
-/* periodical check in cache for jobs and remove old notes */
+/* periodical check in cache for jobs and remove old notes 
+ (useless because of map struct leaks as hell :( )
+*/
 // func cache_handler() {
 
 //     for {

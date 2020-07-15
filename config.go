@@ -19,8 +19,10 @@ var (
 	CFG_KAFKA_ENABLED bool = false
 	CFG_KAFKA_TOPIC string
 	CFG_KAFKA_SERVERS string
+	CFG_KAFKA_LINGERMS int = 1000 
 
 	//urls
+	CFG_NOTIF_ENABLED bool = true
 	CFG_NOTIF_URL string
 	CFG_NOTIF_PERIOD int64 = 5 // seconds 
 	CFG_POST_PERIOD int64 = 5 // how frequent to post if not many macs
@@ -35,6 +37,7 @@ var (
 	CFG_OUI_RENEW_PERIOD int64 = 720
 	CFG_OUI_URL string
 	//cache
+	CFG_CACHE_CHECK int64 = 60
 	CFG_CACHE_MAC_TIMEOUT int64 = 300 // The MAC will be erased from cache after the time inactive
     CFG_CACHE_SNIF_TIMEOUT int64 = 2592000 // The snif will be erased from cache after the time inactive
     CFG_CACHE_BADSNIF_TIMEOUT int64 = 60	
@@ -78,8 +81,10 @@ func ReadConfig(fname string) {
 	CFG_KAFKA_ENABLED = viper.GetBool("kafka.enabled")
 	CFG_KAFKA_TOPIC = viper.GetString("kafka.topic")
 	CFG_KAFKA_SERVERS = viper.GetString("kafka.servers")
+	CFG_KAFKA_LINGERMS = viper.GetInt("kafka.lingerms")
 
 	//url settings
+	CFG_NOTIF_ENABLED = viper.GetBool("http-requests.save_localy")
 	CFG_NOTIF_URL = viper.GetString("http-requests.captured-macs")
 	CFG_STATS_URL = viper.GetString("http-requests.statistics")
 	CFG_TOKEN = viper.GetString("http-requests.token")
@@ -97,7 +102,13 @@ func ReadConfig(fname string) {
 	CFG_OUI_RENEW_PERIOD = viper.GetInt64("ouidb.renew_period")
 
 	//cache
+	CFG_CACHE_CHECK = viper.GetInt64("cache.check")
 	CFG_CACHE_MAC_TIMEOUT = viper.GetInt64("cache.mac_timeout")
 	CFG_CACHE_SNIF_TIMEOUT = viper.GetInt64("cache.snif_timeout")
 	CFG_CACHE_BADSNIF_TIMEOUT = viper.GetInt64("cache.badsnif_timeout")
+
+    if CFG_STATS_PERIOD == 0 {
+        panic("requests.stats_period in config file can't be zero!")
+    }
+
 }

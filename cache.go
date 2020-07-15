@@ -3,23 +3,24 @@ package main
 import (
     "github.com/sirupsen/logrus"
     "time"
-	//"fmt"
+	"fmt"
     //"reflect"
     "sync"
     "sync/atomic"
+    // "runtime"
 )
 
 var (
 
     bad_snifs_cache = struct{
         sync.RWMutex
-        m map[string]BadSnifStruct
-    }{m: make(map[string]BadSnifStruct)}
+        m map[string]*BadSnifStruct
+    }{m: make(map[string]*BadSnifStruct)}
 
     snif_cache = struct{
         sync.RWMutex
-        snifs map[string]captured_snif
-    }{snifs: make(map[string]captured_snif)} 
+        snifs map[string]*captured_snif
+    }{snifs: make(map[string]*captured_snif)} 
 
     // mac_cache = struct{
     //     sync.RWMutex
@@ -62,19 +63,19 @@ type captured_MAC struct {
 
 /* structure of cache for captured MACs */
 type captured_snif struct {
-    macs map[string]captured_MAC    `json:"-"`
+    macs map[string]*captured_MAC    `json:"-"`
     Ip string                       `json:"ip"`
     Id string                       `json:"id"`    
     Packets_period int64            `json:"pct_cnt"`
     First_time int64                `json:"ts_first"`
     Update_time int64               `json:"ts_last"`
     Badsnif bool                    `json:"badsnif"`
-    Macs_cnt int64                  `json:"macs_cnt"`
-    // Pps int64                       `json:"pps"`
+    Macs_cached int                 `json:"macs_cached"`        
+    Pps int64                       `json:"pps"`
+
+    // Macs_cnt int64                  `json:"macs_cnt"`
     // Packets_total int64             `json:"total_cnt"`    
-    // New_macs int64                  `json:"new_macs"`
-    // macs map[string]captured_MAC    `json:"-"`
-    // Macs_cached int                 `json:"macs_cached"` 
+    // New_macs int64                  `json:"new_macs"` 
     // Post_macs int64                 `json:"post_macs"`
 }
 
@@ -127,7 +128,8 @@ func (m *BadSnifStruct) id() string {
 }
 
 func (m *BadSnifStruct) cached() bool {
-    return bad_snifs_cache.m[m.id()].first_time != 0
+    return bad_snifs_cache.m[m.id()] != nil
+    // return bad_snifs_cache.m[m.id()].first_time != 0
 }
 
 func (m *BadSnifStruct) dobby_is_free() bool {
@@ -143,7 +145,7 @@ func (m *BadSnifStruct) update() { // m is the data from packet!
 
 func (m *BadSnifStruct) save() {
     m.first_time = time.Now().Unix()
-    bad_snifs_cache.m[m.id()] = *m
+    bad_snifs_cache.m[m.id()] = m
     m.update()
 }
 
@@ -153,17 +155,19 @@ func (m *BadSnifStruct) save() {
 
 /* store/append mac-cache with data from packet,
 returns 'notified' boolean state */
-func (m captured_MAC) store() (captured_MAC, error) {
+func (m *captured_MAC) store() (captured_MAC, error) {
     snif := snif_cache.snifs[m.Sensor_id]
     cache := snif.macs[m.Mac]
     // cache := mac_cache.macs[m.Mac]
 
-    if cache.First_time == 0 {
+    // if cache.First_time == 0 { // old for non pointer storage
+    if cache == nil {
+        cache = m
         cache.Notified_count = 1
         atomic.AddInt64(&macs_discovered, 1)
         atomic.AddInt64(&macs_discovered_total, 1)
-        snif.Macs_cnt ++
-        cache = m
+        // snif.Macs_cnt ++
+
         cache.post_period = atomic.LoadInt64(&CFG_NOTIF_PERIOD)
         cache.First_time = time.Now().Unix()
         cache.send_it = true // switch on the flag if MAC apears
@@ -192,33 +196,34 @@ func (m captured_MAC) store() (captured_MAC, error) {
     snif.macs[m.Mac] = cache
     snif_cache.snifs[m.Sensor_id] = snif
 
-    return cache, nil
+    return *cache, nil
 
 }
 
 /* Check if it is time to send */
-func (m captured_MAC) time_to_send() bool {
+func (m *captured_MAC) time_to_send() bool {
     return m.Update_time + m.post_period < time.Now().Unix()
 }
 
-func (m captured_MAC) lock() {
+func (m *captured_MAC) lock() {
     snif_cache.Lock()
 }
 
-func (m captured_MAC) unlock() {
+func (m *captured_MAC) unlock() {
     snif_cache.Unlock()    
 
 }
 
 
 
-func (new captured_snif) store() (captured_snif, error) { // m is the data from packet!
+func (new *captured_snif) store() (*captured_snif, error) { // m is the data from packet!
     //cached := captured_macs_cache[m.id()]
     cache := snif_cache.snifs[new.Id]
 
-    if cache.First_time == 0 { // if new sniffer in cache
+    // if cache.First_time == 0 { // if new sniffer in cache
+    if cache == nil { // if new sniffer (not in cache yet)
         cache = new
-        cache.macs = make(map[string]captured_MAC)
+        cache.macs = make(map[string]*captured_MAC)
         cache.First_time = time.Now().Unix()
         log.Trace(cache.Id,": the NEW Snif has been detected with ip: ",cache.Ip)
     }
@@ -238,32 +243,14 @@ func (new captured_snif) store() (captured_snif, error) { // m is the data from 
 
 }
 
-func (m captured_snif) lock() {
+func (m *captured_snif) lock() {
     snif_cache.Lock()
 }
 
-func (m captured_snif) unlock() {
+func (m *captured_snif) unlock() {
     snif_cache.Unlock()    
 
 }
-
-
-// /* reset counters */
-// func ResetCountersForSnif(id string) {
-//     snif_cache.Lock()
-//     s := snif_cache.snifs[id]
-//     s.New_macs = 0
-//     snif_cache.snifs[id] = s
-//     snif_cache.Unlock()  
-// }
-
-/* stores data in cache. returns true if new */
-// func SaveItInCache(l cache_int) (bool,error) {
-//     l.lock()
-//     result,err := l.store()
-//     l.unlock()
-//     return result,err
-// }
 
 func CountSnifs() int {
     snif_cache.Lock()
@@ -273,7 +260,7 @@ func CountSnifs() int {
 }
 
 /* output statistics as json */
-func GetSnifs() map[string]captured_snif {
+func GetSnifs() map[string]*captured_snif {
     snif_cache.Lock()
     result := snif_cache.snifs
     snif_cache.Unlock()
@@ -283,126 +270,73 @@ func GetSnifs() map[string]captured_snif {
 
 
 /* periodical check in cache for jobs and remove old notes 
- (useless because of map struct leaks as hell :( )
 */
-// func cache_handler() {
+func cache_cleaner() {
 
-//     for {
-//         //start := time.Now()
+    for {
+        start := time.Now()
+        var macs_total int // total num of macs in cache for all snifs
+        var macs_removed int64
+        var snifs_removed int64
 
-//         //notif_list := []interface{}{}
-//         var macs_total int // total amount of macs
+        snif_cache.Lock()
+        cache_map := snif_cache.snifs
 
-//         main_cache.Lock()
-//         cache_map := main_cache.snifs
+        for j,sn := range cache_map {
 
-//         for j,sn := range cache_map {
-//             if sn.Update_time != 0 {
-//                 st_p := atomic.LoadInt64(&CFG_NOTIF_PERIOD)
+            if sn.Update_time + atomic.LoadInt64(&CFG_CACHE_SNIF_TIMEOUT) < time.Now().Unix() {
+                delete(cache_map, j)
+                snifs_removed++
+                log.Debug("[CACHE CLEAN] removed inactive sniffer: ",sn.Id,"-",sn.Ip)
+                continue
+            }
 
-//                 sn.Pps = sn.Packets_period / st_p // + 1
+            for i,vi := range sn.macs {
 
-//                 macs_cached := len(sn.macs)
-//                 macs_total += macs_cached
+                if vi.Update_time + atomic.LoadInt64(&CFG_CACHE_MAC_TIMEOUT) < time.Now().Unix() {
+                    delete(sn.macs, i)
+                    macs_removed++
 
-//                 log.WithFields(logrus.Fields{
-//                 "snifid": sn.Id,
-//                 "snifip": sn.Ip,
-//                 "macs_cached": macs_cached,
-//                 "packets": sn.Packets_period,
-//                 "p_total": sn.Packets_total,
-//                 "pps": sn.Pps,
-//                 }).Debug(  //Trace
-//                 "snif-statistics")
+                    log.WithFields(logrus.Fields{
+                    "sensor": vi.Sensor_id,
+                    "mac": vi.Mac,
+                    "vendor" :  vi.Vendor,
+                    "rssi_last" :  vi.RSSI_current,
+                    "rssi_max" :  vi.RSSI_max,
+                    "first_time" : vi.First_time,
+                    "sent" :!vi.send_it,
+                    "sent_count": vi.Notified_count,
+                    }).Trace("[CACHE CLEAN] An old MAC has been Removed")
+                }
+            }
+            st_p := atomic.LoadInt64(&CFG_CACHE_CHECK)
+            sn.Pps = sn.Packets_period / st_p
 
-//                 sn.Packets_period = 0
-                
-//                 sn.New_macs = 0
-//                 sn.Post_macs = 0
-//                 sn.Macs_cached = macs_cached             
+            sn.Macs_cached = len(sn.macs)
+            macs_total += sn.Macs_cached
 
-//                 for i,vi := range sn.macs {
+            log.WithFields(logrus.Fields{
+            "snifid": sn.Id,
+            "snifip": sn.Ip,
+            "macs_cached": sn.Macs_cached,
+            "pps": sn.Pps,
+            "packets": sn.Packets_period,
+            // "p_total": sn.Packets_total,
+            
+            }).Debug(  //Trace
+            "snif-statistics for period (seconds):",st_p)
 
-//                     if vi.send_it { // vi.notif_time < time.Now().Unix() && !vi.notified
-//                         // append to notif_list the mac
-//                         t := strconv.FormatInt(vi.Update_time, 10)
-//                         //t := strconv.FormatInt(vi.update_time/1e9, 10)
-                        
-//                         //var rssi_avg int64 = -127
-//                         //if vi.Frames_count > 0 {rssi_avg = vi.RSSI_sum / vi.Frames_count}
+            sn.Packets_period = 0            
+            cache_map[j] = sn
+        }
+        // runtime.GC() //collect garbage и
 
-//                         vi.Notified_count++
+        s := fmt.Sprintf("[CACHE CLEAN] Cached/Removed_old: snifs: %d/%d, macs: %d/%d. It took: %s ",
+            len(cache_map),snifs_removed,macs_total,macs_removed,time.Since(start))
+        log.Info(s)
+        snif_cache.Unlock()
 
-//                         log.WithFields(logrus.Fields{
-//                         "snifid": vi.Sensor_id,
-//                         "snifip": vi.Src_ip,
-//                         "kn_from": vi.First_time,
-//                         "last_ts": t,
-//                         "mac": vi.Mac,
-//                         "Ch" : vi.Channel,
-//                         "FrCnt" : vi.Frames_count,
-//                         //"vendor" :  vi.vendor,
-//                         "Notif" :vi.Notified_count,
-//                         "rssi" :  vi.RSSI_current,
-//                         "rssi_max" :  vi.RSSI_max}).Debug(  //Trace
-//                         "the mac is ready to POST")
 
-//                         // data := map[string]string{
-//                         //     "SnifID" : vi.Sensor_id,
-//                         //     "SnifIP" : vi.Src_ip,
-//                         //     "MAC" : vi.Mac,
-//                         //     "Channel" : strconv.FormatInt(vi.Channel, 10),
-//                         //     "Vendor" : vi.Vendor,                        
-//                         //     "KnownFrom" : strconv.FormatInt(vi.First_time, 10),
-//                         //     "LastSeen" : t,
-//                         //     "RSSImax" : strconv.FormatInt(vi.RSSI_max, 10),
-//                         //     //"RSSI" : strconv.FormatInt(vi.RSSI_current, 10),
-//                         //     "RSSI" : strconv.FormatInt(vi.RSSI_current, 10),
-//                         //     "NotifiedCount" : strconv.FormatInt(vi.Notified_count, 10),
-//                         //     "FramesCount" : strconv.FormatInt(vi.Frames_count, 10),
-//                         // }
-
-//                         // notif_list = append(notif_list,data)
-//                         sn.Post_macs ++
-
-//                         //vi.notif_time = time.Now().Unix() + notification_time
-//                         vi.send_it = false
-//                         vi.Frames_count = 0
-//                         vi.RSSI_max = 0
-//                         vi.RSSI_current = 0
-//                         //fmt.Println(vi)
-//                         sn.macs[i] = vi
-//                     }
-
-//                     if vi.Update_time + atomic.LoadInt64(&CFG_CACHE_MAC_TIMEOUT) < time.Now().Unix() {
-//                         delete(sn.macs, i)
-
-//                         log.WithFields(logrus.Fields{
-//                         "cache" : i,
-//                         "sensor": vi.Sensor_id,
-//                         "mac": vi.Mac,
-//                         "vendor" :  vi.Vendor,
-//                         "rssi_last" :  vi.RSSI_current,
-//                         "rssi_max" :  vi.RSSI_max,
-//                         "first_time" : vi.First_time,
-//                         "sent" :!vi.send_it,
-//                         "sent_count": vi.Notified_count,
-//                         }).Trace("An old MAC has been Removed from cache:")
-//                     }
-//                 }
-//                 cache_map[j] = sn
-//             }
-//         }
-
-//         //captured_macs_cache.m = cache_map
-//         // s := fmt.Sprintf("Cache: snifs:%d,macs:%d took: %s ",
-//         //     len(cache_map),macs_total,time.Since(start))
-//         // log.Info(s)
-//         main_cache.Unlock()
-
-        
-//         //if len(notif_list) > 0 { go PostMacList(notif_list) }
-
-//         time.Sleep(time.Duration(atomic.LoadInt64(&CFG_NOTIF_PERIOD)) * time.Second)
-//     }
-// }
+        time.Sleep(time.Duration(atomic.LoadInt64(&CFG_CACHE_CHECK)) * time.Second)
+    }
+}

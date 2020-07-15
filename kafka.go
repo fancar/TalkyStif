@@ -14,7 +14,10 @@ func Kafka() {
 	topic := CFG_KAFKA_TOPIC
 
 	p, err := kafka.NewProducer(&kafka.ConfigMap{
-		"bootstrap.servers": CFG_KAFKA_SERVERS}) 
+		"bootstrap.servers": CFG_KAFKA_SERVERS,
+		"linger.ms" : CFG_KAFKA_LINGERMS,
+		// "batch.size" : CFG_KAFKA_BATCHSIZE,
+	})
 		// "debug": "broker"})
 	if err != nil {
 		log.Error("[kafka] "+err.Error())

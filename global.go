@@ -11,7 +11,7 @@ import (
 )
 
 const (
-    version string = "0.6.11"
+    version string = "0.6.21"
     Version string = "Talky Stif | TZSP colector with concurency | "+version    
     time_format string = "2006-01-02 15:04:05"
 )
@@ -24,6 +24,7 @@ var (
     BEARER_TOKEN string = "Bearer " + TOKEN
 
     log = logrus.New()
+    fields = logrus.Fields{}
      
     start_time time.Time
     start_time_u int64

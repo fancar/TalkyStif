@@ -74,7 +74,6 @@ func main() {
     ErrorAndExit("Can't listen UDP port",err)
 
     log.Info("Waiting for TZSP flows...")
-    
     for i := 0; i < runtime.NumCPU(); i++ {
         go handlePacket(conn, quit)
     }
@@ -82,7 +81,7 @@ func main() {
     go runWebServer(httpserver_ip_port)
 
     go print_stats()
-    //go cache_handler()
+    go cache_cleaner()
     go OuidbUpdater()
 
     go Kafka()
@@ -100,7 +99,6 @@ sorry about the spagetti-length ;-)
 func handlePacket(conn *net.UDPConn , quit chan struct{}) {
     buf := make([]byte, 1024)
     l, udp, err_ := 0, new(net.UDPAddr), error(nil)
-
 
     for err_ == nil {
         l, udp, err_ = conn.ReadFromUDP(buf)
@@ -156,7 +154,7 @@ func handlePacket(conn *net.UDPConn , quit chan struct{}) {
                         "vendor" : vendor,
                         "RSSI" :  tzsp["RSSI"]}).Trace("Gotcha: "+mac.String()) 
 
-    			    c := captured_MAC{
+    			    c := &captured_MAC{
     	            Src_ip: udp.IP.String(),
     	            Vendor: vendor,
     	            Sensor_id: tzsp["sensor_id"].(string),
@@ -187,21 +185,24 @@ func snif_counters(mac string,ip string) bool {
 }
 
 /* save/update mac in cache and notify about it if new or from time to time */
-func MacHandler(c captured_MAC) {
+func MacHandler(c *captured_MAC) {
     c.lock()
-    c,err := c.store()
-    c.unlock()
+    copy,err := c.store()
 
     if err != nil { log.Error("Can not save it in cache: ",c,err) }
+    c.unlock()
 
-    if c.send_it {
-        msg := fmt.Sprintf("snif: %s mac to send: %s", c.Src_ip,c.Mac)
+    if copy.send_it {
+        msg := fmt.Sprintf("snif: %s mac to send: %s", copy.Src_ip,copy.Mac)
         log.Debug("[MacHandler] ",msg)
 
-        mac_to_produce <- c // kafka
-        mac_to_post <- c // local storage
-
+        mac_to_produce <- copy // kafka
+        if CFG_NOTIF_ENABLED {
+            mac_to_post <- copy // local storage            
+        }
+        c.lock()
         c.send_it = false
+        c.unlock()
     }
 
 }
@@ -260,7 +261,7 @@ type MainStats struct {
 
 type CombinedStats struct {
     Main MainStats `json:"main"`
-    Snifs map[string]captured_snif `json:"snifs"`
+    Snifs map[string]*captured_snif `json:"snifs"`
 }
 
 /* build statistics for logs and POST */
@@ -271,12 +272,11 @@ func CollectStats(version string) MainStats {
     time_now := time.Now().Unix()
     v, _ := mem.VirtualMemory()
     st_p := atomic.LoadInt64(&CFG_STATS_PERIOD)
-
+    s.Pps = atomic.LoadInt64(&packets_count) / st_p
     s.Version = version
     s.NumCPU = numcpu
     s.Snifs = CountSnifs()
     s.Goroutines = runtime.NumGoroutine()
-    s.Pps = atomic.LoadInt64(&packets_count) / st_p
     s.Timestamp = time_now
     s.Mem_usage = int(v.UsedPercent)
     s.Load_prcnt = int(load.Load1 * 100 / float64(numcpu))
@@ -328,7 +328,6 @@ CFG_STATS_PERIOD var (logtime parameter)
 func print_stats() {
     ver := version
     for {
-        
         stat := CollectStats(ver)
         // snifs := GetSnifs()
         snif_cache.Lock()

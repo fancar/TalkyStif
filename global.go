@@ -11,7 +11,7 @@ import (
 )
 
 const (
-    version string = "0.6.21"
+    version string = "0.6.22"
     Version string = "Talky Stif | TZSP colector with concurency | "+version    
     time_format string = "2006-01-02 15:04:05"
 )

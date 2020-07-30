@@ -26,6 +26,7 @@ var (
 	CFG_NOTIF_URL string
 	CFG_NOTIF_PERIOD int64 = 5 // seconds 
 	CFG_POST_PERIOD int64 = 5 // how frequent to post if not many macs
+	CFG_POST_MACS_MAX int64 = 300000 // how frequent to post if not many macs
 	CFG_STATS_URL string
 	CFG_STATS_PERIOD int64 = 60
 	CFG_TOKEN string
@@ -90,6 +91,7 @@ func ReadConfig(fname string) {
 	CFG_TOKEN = viper.GetString("http-requests.token")
 	
 	CFG_POST_PERIOD = viper.GetInt64("http-requests.post_period")
+	CFG_POST_MACS_MAX = viper.GetInt64("http-requests.post_macs_max")
 	CFG_STATS_PERIOD = viper.GetInt64("http-requests.stats_period")
 
 	//logs

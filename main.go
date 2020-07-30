@@ -400,30 +400,31 @@ func PostJson(jsonValue []byte, url string) {
 }
 
 
-/* temp legacy
+/* posts to local clickhouse db
  the goroutine gets macs from 'ready_to_post'
  channel and sends it by http-post
 */
 func MACpostman() {
     duration := atomic.LoadInt64(&CFG_POST_PERIOD)
-    max_macs := 42 // max macs in json
+    max_macs := atomic.LoadInt64(&CFG_POST_MACS_MAX) // max macs in one post
     post_time := time.Now().Unix()
 
     data := []captured_MAC{}
-
+    
     for {
         ready_to_post := false
         m := <-mac_to_post
         data = append(data,m)
-        f := logrus.Fields{"mac-to-send":m.Mac,"len":len(data)}
+        data_len := int64(len(data))
+        f := logrus.Fields{"mac-to-send":m.Mac,"len":data_len}
         log.WithFields(f).Debug("[MACpostman] prepeared mac to send")
 
-        if len(data) > max_macs+1 {
-            log.Debug("[MACpostman] sending macs. Len:",len(data))
+        if data_len > max_macs+1 {
+            log.Debug("[MACpostman] sending macs. Len:",data_len)
             ready_to_post = true
         } else {
             if time.Now().Unix() > post_time + duration {
-                log.Debug("[MACpostman] sending macs by time. Len:",len(data))
+                log.Debug("[MACpostman] sending by time. Macs:",data_len)
                 ready_to_post = true           
             }
         }

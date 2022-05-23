@@ -118,10 +118,12 @@ func handlePacket(conn *net.UDPConn, quit chan struct{}) {
         }
 
         Raw_fr := tzsp["dot11header"].([]byte)
-        Dot11, err := tzspanalyser.ParseDot11(Raw_fr)
-        if err != nil {
-            log.Trace("warning while parsing 802.11 layer:  ", err)
-        }
+
+        Dot11 := tzspanalyser.ParseDot11(Raw_fr)
+        // Dot11, err := tzspanalyser.ParseDot11(Raw_fr)
+        // if err != nil {
+        //     log.Trace("unable to parse 802.11 layer:  ", err)
+        // }
 
         log.WithFields(logrus.Fields{
             "sensor_id": tzsp["sensor_id"], "sensor_ip": udp.IP,

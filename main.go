@@ -1,77 +1,75 @@
 package main
 
 import (
-    "time"
     "net"
     "strings"
+    "time"
     //"github.com/google/go-cmp/cmp"
     //"strconv"
-    "runtime"
-    "enforta/tzspanalyser"
-    "github.com/sirupsen/logrus"
+    "github.com/fancar/tzspanalyser"
     "github.com/shirou/gopsutil/load"
+    "github.com/sirupsen/logrus"
+    "runtime"
     //"github.com/shirou/gopsutil/cpu"
-    "github.com/shirou/gopsutil/mem"
-    "encoding/json"
-    "net/http"
     "bytes"
+    "encoding/json"
+    "github.com/shirou/gopsutil/mem"
+    "net/http"
     //"sync"
     "sync/atomic"
-   // "reflect"
-   "fmt"
+    // "reflect"
+    "fmt"
 )
 
-
 var (
-    mac_to_post = make(chan captured_MAC,44000) // for POSTs to localdb
-    mac_to_produce = make(chan captured_MAC,44000) // or kafka producer
-    //mutex = &sync.Mutex{}    
-    
+    mac_to_post    = make(chan captured_MAC, 44000) // for POSTs to localdb
+    mac_to_produce = make(chan captured_MAC, 44000) // or kafka producer
+    //mutex = &sync.Mutex{}
+
     //ouiDBrenew_hours time.Duration  = 1 // when file expire hours
     //FilterByVendor bool = false
     //check_all_macs bool = false
 
     //802.11 frame types to ignore
     ignore_frames = map[string]bool{
-        "MgmtBeacon": true,
+        "MgmtBeacon":    true,
         "MgmtProbeResp": true,
-    }    
+    }
 
     //vendors to ignore
     ignore_vendors = map[string]bool{
-        "InfiNet LLC" : true,
-        "D-LINK SYSTEMS, INC." : true,
-        "D-Link International" : true,
-        "Juniper Networks" : true,
-        "Cisco Systems, Inc" : true,
-        "TP-LINK TECHNOLOGIES CO.,LTD." : true,
-        "Zyxel Communications Corporation" : true,
-        "Cambium Networks Limited": true,
-        "Ruckus Wireless": true,
-        "Routerboard.com": true,
-        "Ubiquiti Networks Inc.": true,
-        "unknown": true,
-        "unavailable": true,
+        "InfiNet LLC":                      true,
+        "D-LINK SYSTEMS, INC.":             true,
+        "D-Link International":             true,
+        "Juniper Networks":                 true,
+        "Cisco Systems, Inc":               true,
+        "TP-LINK TECHNOLOGIES CO.,LTD.":    true,
+        "Zyxel Communications Corporation": true,
+        "Cambium Networks Limited":         true,
+        "Ruckus Wireless":                  true,
+        "Routerboard.com":                  true,
+        "Ubiquiti Networks Inc.":           true,
+        "unknown":                          true,
+        "unavailable":                      true,
     }
 
     // 802.11 flags to ignore
     ignore_flags = map[string]bool{
         "FROM-DS": true,
     }
-
-)     
+)
 
 func main() {
     quit := make(chan struct{})
     Init()
 
     err := MakeOuidb(ouiFileName)
-    ErrorAndExit("Can't init OUI Database",err)
+    ErrorAndExit("Can't init OUI Database", err)
 
-    ServerAddr,err := net.ResolveUDPAddr(proto_db,port_db)
-    ErrorAndExit("can't resolve udp",err)    
+    ServerAddr, err := net.ResolveUDPAddr(proto_db, port_db)
+    ErrorAndExit("can't resolve udp", err)
     conn, err := net.ListenUDP("udp", ServerAddr)
-    ErrorAndExit("Can't listen UDP port",err)
+    ErrorAndExit("Can't listen UDP port", err)
 
     log.Info("Waiting for TZSP flows...")
     for i := 0; i < runtime.NumCPU(); i++ {
@@ -87,16 +85,15 @@ func main() {
     go Kafka()
     go MACpostman()
 
-
     <-quit // hang until an error
     log.Info("Exit")
 }
 
 /*
-the goriutines for handling with TZSP packets from mikrotik routers 
+the goriutines for handling with TZSP packets from mikrotik routers
 sorry about the spagetti-length ;-)
 */
-func handlePacket(conn *net.UDPConn , quit chan struct{}) {
+func handlePacket(conn *net.UDPConn, quit chan struct{}) {
     buf := make([]byte, 1024)
     l, udp, err_ := 0, new(net.UDPAddr), error(nil)
 
@@ -105,80 +102,86 @@ func handlePacket(conn *net.UDPConn , quit chan struct{}) {
         //start_ := time.Now()
         atomic.AddInt64(&packets_count, 1)
 
-        if SnifIsBad(udp.IP.String()) { continue }
+        if SnifIsBad(udp.IP.String()) {
+            continue
+        }
 
-        tzsp,err := tzspanalyser.Parse(buf[:l])
+        tzsp, err := tzspanalyser.Parse(buf[:l])
         if err != nil {
-            log.Error(udp.IP.String(),": Recieved data from snif which is bad: ",err)
+            log.Error(udp.IP.String(), ": Recieved data from snif which is bad: ", err)
             CacheBadSnif(udp.IP.String())
             continue
         }
-        
-        if !snif_counters(tzsp["sensor_id"].(string),udp.IP.String()) { continue }
+
+        if !snif_counters(tzsp["sensor_id"].(string), udp.IP.String()) {
+            continue
+        }
 
         Raw_fr := tzsp["dot11header"].([]byte)
-        Dot11,err := tzspanalyser.ParseDot11(Raw_fr)
-        if err != nil {log.Trace("warning while parsing 802.11 layer:  ",err)}
+        Dot11, err := tzspanalyser.ParseDot11(Raw_fr)
+        if err != nil {
+            log.Trace("warning while parsing 802.11 layer:  ", err)
+        }
 
         log.WithFields(logrus.Fields{
             "sensor_id": tzsp["sensor_id"], "sensor_ip": udp.IP,
-            "Type" :    Dot11.Type, "Flags" :  Dot11.Flags,
+            "Type": Dot11.Type, "Flags": Dot11.Flags,
             "mac1": Dot11.Address1, "mac2": Dot11.Address2,
             "mac3": Dot11.Address3, "mac4": Dot11.Address4,
-            "RSSI" :  tzsp["RSSI"], "RawRate" :  tzsp["data_rate"].(int64),
-            "Raw_channel" : tzsp["rx_channel"].(int64),
-            "DurationID": Dot11.DurationID,"SequenceNumber": Dot11.SequenceNumber,
-            "FragmentNumber": Dot11.FragmentNumber,"Checksum": Dot11.Checksum,
-            "QOS": Dot11.QOS,"HTControl": Dot11.HTControl,
+            "RSSI": tzsp["RSSI"], "RawRate": tzsp["data_rate"].(int64),
+            "Raw_channel": tzsp["rx_channel"].(int64),
+            "DurationID":  Dot11.DurationID, "SequenceNumber": Dot11.SequenceNumber,
+            "FragmentNumber": Dot11.FragmentNumber, "Checksum": Dot11.Checksum,
+            "QOS": Dot11.QOS, "HTControl": Dot11.HTControl,
             "DataLayer": Dot11.DataLayer,
-            "RawDot11" :    Raw_fr}).Trace(  //Trace
-            "the frame from sniffer:" +tzsp["sensor_id"].(string)) 
+            "RawDot11":  Raw_fr}).Trace( //Trace
+            "the frame from sniffer:" + tzsp["sensor_id"].(string))
 
-    	mac := Dot11.Address2
-    	if len(mac) != 0 {
-    		if MacIsFine(mac) {
-    			vendor := VendorName(mac)
+        mac := Dot11.Address2
+        if len(mac) != 0 {
+            if MacIsFine(mac) {
+                vendor := VendorName(mac)
 
                 // ignore some frame types, vendors and flags...
                 flags := strings.Split(Dot11.Flags.String(), ",")
-    			//if !ignore_frames[Dot11.Type.String()] &&
+                //if !ignore_frames[Dot11.Type.String()] &&
 
                 if !ignore_vendors[vendor] &&
-                   !ignore_flags[flags[0]] {
+                    !ignore_flags[flags[0]] {
 
                     log.WithFields(logrus.Fields{
                         "sensor_id": tzsp["sensor_id"], "sensor_ip": udp.IP,
-                        "Type" :    Dot11.Type, "Flags" :  Dot11.Flags,
+                        "Type": Dot11.Type, "Flags": Dot11.Flags,
                         "mac1": Dot11.Address1, "mac2": Dot11.Address2,
                         "mac3": Dot11.Address3, "mac4": Dot11.Address4,
-                        "vendor" : vendor,
-                        "RSSI" :  tzsp["RSSI"]}).Trace("Gotcha: "+mac.String()) 
+                        "vendor": vendor,
+                        "RSSI":   tzsp["RSSI"]}).Trace("Gotcha: " + mac.String())
 
-    			    c := &captured_MAC{
-    	            Src_ip: udp.IP.String(),
-    	            Vendor: vendor,
-    	            Sensor_id: tzsp["sensor_id"].(string),
-    	            Mac: mac.String(),
-                    Channel: tzsp["rx_channel"].(int64),
-    	            RSSI_current: tzsp["RSSI"].(int64)}
+                    c := &captured_MAC{
+                        Src_ip:       udp.IP.String(),
+                        Vendor:       vendor,
+                        Sensor_id:    tzsp["sensor_id"].(string),
+                        Mac:          mac.String(),
+                        Channel:      tzsp["rx_channel"].(int64),
+                        RSSI_current: tzsp["RSSI"].(int64)}
 
-    	        	go MacHandler(c)
-    			}
-    		} 
-    	}	    	
+                    go MacHandler(c)
+                }
+            }
+        }
     }
-    log.Error("UDP port listen error:",err_)
+    log.Error("UDP port listen error:", err_)
     quit <- struct{}{}
-}   
+}
 
 /* just make counters for the sniffer */
-func snif_counters(mac string,ip string) bool {
-    s := captured_snif{Id:mac,Ip:ip}
+func snif_counters(mac string, ip string) bool {
+    s := captured_snif{Id: mac, Ip: ip}
     s.lock()
-    _,err := s.store()
-    s.unlock()    
+    _, err := s.store()
+    s.unlock()
     if err != nil {
-        log.Error("Can not save SNIF in cache: ",err)
+        log.Error("Can not save SNIF in cache: ", err)
         return false
     }
     return true
@@ -187,18 +190,20 @@ func snif_counters(mac string,ip string) bool {
 /* save/update mac in cache and notify about it if new or from time to time */
 func MacHandler(c *captured_MAC) {
     c.lock()
-    copy,err := c.store()
+    copy, err := c.store()
 
-    if err != nil { log.Error("Can not save it in cache: ",c,err) }
+    if err != nil {
+        log.Error("Can not save it in cache: ", c, err)
+    }
     c.unlock()
 
     if copy.send_it {
-        msg := fmt.Sprintf("snif: %s mac to send: %s", copy.Src_ip,copy.Mac)
-        log.Debug("[MacHandler] ",msg)
+        msg := fmt.Sprintf("snif: %s mac to send: %s", copy.Src_ip, copy.Mac)
+        log.Debug("[MacHandler] ", msg)
 
         mac_to_produce <- copy // kafka
         if CFG_NOTIF_ENABLED {
-            mac_to_post <- copy // local storage            
+            mac_to_post <- copy // local storage
         }
         c.lock()
         c.send_it = false
@@ -209,16 +214,16 @@ func MacHandler(c *captured_MAC) {
 
 /* returns vendor name by mac according to oui database */
 func VendorName(mac net.HardwareAddr) string {
-	if len(mac) == 6 {
-	    vendor,err := tzspanalyser.VendorByMac(mac)
-	    if err != nil {
-	        log.Error("error while looking for vendor:",err)
-	        return "unavailable"
-	    }
-	    return vendor
-	}
-	log.Error("bad mac: ",mac.String())
-	return "unavailable"
+    if len(mac) == 6 {
+        vendor, err := tzspanalyser.VendorByMac(mac)
+        if err != nil {
+            log.Error("error while looking for vendor:", err)
+            return "unavailable"
+        }
+        return vendor
+    }
+    log.Error("bad mac: ", mac.String())
+    return "unavailable"
 }
 
 // true -  if mac looks good (unicast and oui unique bits enabled)
@@ -231,36 +236,36 @@ func MacIsFine(mac net.HardwareAddr) bool {
 
 /* the daemon sends some statistics from time to time */
 type MainStats struct {
-    Version string          `json:"version"`
-    NumCPU int              `json:"NumCPU"`
-    Snifs int               `json:"snifs"`
-    Goroutines int          `json:"goroutines"`
-    Pps int64               `json:"pps"`
-    Timestamp int64         `json:"ts_last"`
-    Mem_usage int           `json:"mem_usage"`
-    Load_prcnt int          `json:"load_prcnt"`
-    Period int64            `json:"period"`
-    Load_1m float64         `json:"load_1m"`
-    Load_5m float64         `json:"load_5m"`
-    Load_15m float64        `json:"load_15m"`
-    Snifs_cached int        `json:"snifs_cached"`
-    Macs_discovered int64       `json:"macs_discovered"`
-    Macs_discovered_total int64 `json:"macs_discovered_total"`
-    Macs_sent int64         `json:"macs_sent"`
-    Macs_sent_total int64   `json:"macs_sent_total"`
-    Kafka_fail int64         `json:"kafka_fail"`
-    Kafka_fail_total int64   `json:"kafka_fail_total"`    
-    Post_count int64   `json:"post_count"` 
-    Post_count_total int64   `json:"post_count_total"`
-    Post_errors_count int64   `json:"post_errors_count"` 
-    Post_errors_count_total int64   `json:"post_errors_count_total"` 
+    Version                 string  `json:"version"`
+    NumCPU                  int     `json:"NumCPU"`
+    Snifs                   int     `json:"snifs"`
+    Goroutines              int     `json:"goroutines"`
+    Pps                     int64   `json:"pps"`
+    Timestamp               int64   `json:"ts_last"`
+    Mem_usage               int     `json:"mem_usage"`
+    Load_prcnt              int     `json:"load_prcnt"`
+    Period                  int64   `json:"period"`
+    Load_1m                 float64 `json:"load_1m"`
+    Load_5m                 float64 `json:"load_5m"`
+    Load_15m                float64 `json:"load_15m"`
+    Snifs_cached            int     `json:"snifs_cached"`
+    Macs_discovered         int64   `json:"macs_discovered"`
+    Macs_discovered_total   int64   `json:"macs_discovered_total"`
+    Macs_sent               int64   `json:"macs_sent"`
+    Macs_sent_total         int64   `json:"macs_sent_total"`
+    Kafka_fail              int64   `json:"kafka_fail"`
+    Kafka_fail_total        int64   `json:"kafka_fail_total"`
+    Post_count              int64   `json:"post_count"`
+    Post_count_total        int64   `json:"post_count_total"`
+    Post_errors_count       int64   `json:"post_errors_count"`
+    Post_errors_count_total int64   `json:"post_errors_count_total"`
 
     //Uptime int64 `json:"uptime"`
-    Uptime int64            `json:"uptime_sec"`
+    Uptime int64 `json:"uptime_sec"`
 }
 
 type CombinedStats struct {
-    Main MainStats `json:"main"`
+    Main  MainStats                 `json:"main"`
     Snifs map[string]*captured_snif `json:"snifs"`
 }
 
@@ -307,24 +312,23 @@ func CollectStats(version string) MainStats {
 /* choose some fields we put in log */
 func Logrus_fields(s MainStats) logrus.Fields {
     result := logrus.Fields{
-        "snifs"            : s.Snifs,
-        "goroutines"       : s.Goroutines,
-        "load"             : s.Load_prcnt,
-        "mem"              : s.Mem_usage,
-        "pps"              : s.Pps,
-        "macs_sent"        : s.Macs_sent,
-        "send_fail"        : s.Kafka_fail,
-        "posts_fail"        : s.Post_errors_count,
-        "posts"        : s.Post_count,
-        "macs_discovered"  : s.Macs_discovered,
+        "snifs":           s.Snifs,
+        "goroutines":      s.Goroutines,
+        "load":            s.Load_prcnt,
+        "mem":             s.Mem_usage,
+        "pps":             s.Pps,
+        "macs_sent":       s.Macs_sent,
+        "send_fail":       s.Kafka_fail,
+        "posts_fail":      s.Post_errors_count,
+        "posts":           s.Post_count,
+        "macs_discovered": s.Macs_discovered,
     }
     return result
 }
 
-
 /* POST statiscics and logs from time to time
 CFG_STATS_PERIOD var (logtime parameter)
- */
+*/
 func print_stats() {
     ver := version
     for {
@@ -333,14 +337,14 @@ func print_stats() {
         snif_cache.Lock()
         snifs := snif_cache.snifs
         stat.Snifs_cached = len(snifs)
-        data := CombinedStats{ Main : stat, Snifs : snifs, }
+        data := CombinedStats{Main: stat, Snifs: snifs}
 
         logfields := Logrus_fields(stat)
 
-        log.WithFields(logfields).Info(  //Trace
-            "statistics for ",stat.Period," seconds")
+        log.WithFields(logfields).Info( //Trace
+            "statistics for ", stat.Period, " seconds")
 
-        //main_cache.Lock() 
+        //main_cache.Lock()
         j, _ := json.Marshal(data)
         snif_cache.Unlock()
         //main_cache.Unlock()
@@ -348,17 +352,16 @@ func print_stats() {
         //reset counters
         atomic.SwapInt64(&macs_discovered, 0)
         atomic.SwapInt64(&packets_count, 0)
-        atomic.SwapInt64(&macs_notified, 0)        
+        atomic.SwapInt64(&macs_notified, 0)
         atomic.SwapInt64(&kafka_errors_count, 0)
         atomic.SwapInt64(&post_count, 0)
         atomic.SwapInt64(&post_errors_count, 0)
 
-        PostJson(j,CFG_STATS_URL)
+        PostJson(j, CFG_STATS_URL)
         time.Sleep(time.Duration(stat.Period) * time.Second)
     }
 
 }
-
 
 /* send json via http using post request */
 func PostJson(jsonValue []byte, url string) {
@@ -374,7 +377,7 @@ func PostJson(jsonValue []byte, url string) {
     //req.Header.Set("X-Custom-Header", "myvalue")
     req.Header.Set("Content-Type", "application/json")
     if CFG_TOKEN != "" {
-        req.Header.Add("Authorization", "Bearer " + CFG_TOKEN)
+        req.Header.Add("Authorization", "Bearer "+CFG_TOKEN)
     }
 
     client := &http.Client{}
@@ -385,7 +388,7 @@ func PostJson(jsonValue []byte, url string) {
             "Can not send request to http server. ")
         return
     }
-    defer resp.Body.Close()    
+    defer resp.Body.Close()
     log.Debug("[PostJson] Response Status:'", resp.Status)
 
     if resp.StatusCode >= 200 && resp.StatusCode < 300 {
@@ -396,13 +399,12 @@ func PostJson(jsonValue []byte, url string) {
         atomic.AddInt64(&post_errors_count, 1)
         atomic.AddInt64(&post_errors_count_total, 1)
     }
-        
+
 }
 
-
 /* posts to local clickhouse db
- the goroutine gets macs from 'ready_to_post'
- channel and sends it by http-post
+the goroutine gets macs from 'ready_to_post'
+channel and sends it by http-post
 */
 func MACpostman() {
     duration := atomic.LoadInt64(&CFG_POST_PERIOD)
@@ -410,37 +412,37 @@ func MACpostman() {
     post_time := time.Now().Unix()
 
     data := []captured_MAC{}
-    
+
     for {
         ready_to_post := false
         m := <-mac_to_post
-        data = append(data,m)
+        data = append(data, m)
         data_len := int64(len(data))
-        f := logrus.Fields{"mac-to-send":m.Mac,"len":data_len}
+        f := logrus.Fields{"mac-to-send": m.Mac, "len": data_len}
         log.WithFields(f).Debug("[MACpostman] prepeared mac to send")
 
         if data_len > max_macs+1 {
-            log.Debug("[MACpostman] sending macs. Len:",data_len)
+            log.Debug("[MACpostman] sending macs. Len:", data_len)
             ready_to_post = true
         } else {
-            if time.Now().Unix() > post_time + duration {
-                log.Debug("[MACpostman] sending by time. Macs:",data_len)
-                ready_to_post = true           
+            if time.Now().Unix() > post_time+duration {
+                log.Debug("[MACpostman] sending by time. Macs:", data_len)
+                ready_to_post = true
             }
         }
 
         if ready_to_post {
             if !CFG_KAFKA_ENABLED {
-                atomic.SwapInt64(&macs_notified, atomic.LoadInt64(&macs_notified)  + int64(len(data)))        
-                atomic.SwapInt64(&macs_notified_total, atomic.LoadInt64(&macs_notified_total)  + int64(len(data)))
+                atomic.SwapInt64(&macs_notified, atomic.LoadInt64(&macs_notified)+int64(len(data)))
+                atomic.SwapInt64(&macs_notified_total, atomic.LoadInt64(&macs_notified_total)+int64(len(data)))
             }
 
-            json,err := json.Marshal(data)
+            json, err := json.Marshal(data)
             if err != nil {
-                log.Error("Can't parse data into json: ",err)
+                log.Error("Can't parse data into json: ", err)
             }
             //log.Debug("json: ",string(json))
-            go PostJson(json,CFG_NOTIF_URL)
+            go PostJson(json, CFG_NOTIF_URL)
             data = []captured_MAC{} //clear buffer
             post_time = time.Now().Unix()
         }

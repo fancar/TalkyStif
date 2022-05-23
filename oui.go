@@ -8,7 +8,7 @@ import (
     "time"
 )
 
-/* The goroutine updates vendors database from the internet */
+// OuidbUpdater The goroutine updates vendors database from the internet
 func OuidbUpdater() {
     for {
         UpdateOuidb(ouiFileName)
@@ -17,7 +17,7 @@ func OuidbUpdater() {
     //quit <- struct{}{}
 }
 
-/* download a file from the internet */
+// DownloadFile download a file from the internet
 func DownloadFile(filepath string, url string) error {
     log.Info("...downloading file from ", url)
 
@@ -38,7 +38,7 @@ func DownloadFile(filepath string, url string) error {
     return err
 }
 
-/* The func desdecides if we need  renew vendor's database */
+// WeNeedNewFile  desdecides if we need  renew vendor's database
 func WeNeedNewFile(fname string) bool {
 
     file, err := os.Stat(fname)
@@ -58,7 +58,7 @@ func WeNeedNewFile(fname string) bool {
     return false
 }
 
-/* The func downloads vendor's database from the internet */
+// DownloadOui downloads vendor's database from the internet
 func DownloadOui(fname string) error {
 
     err := DownloadFile(fname, CFG_OUI_URL)
@@ -70,26 +70,27 @@ func DownloadOui(fname string) error {
 
 }
 
-/* try to open database file, download if need */
+// MakeOuidb try to open database file, download if need
 func MakeOuidb(fname string) error {
 
-    if _, err_ := os.Stat(fname); os.IsNotExist(err_) {
+    if _, err := os.Stat(fname); os.IsNotExist(err) {
         //ErrorAndExit("cant find file",err)
-        log.Warning("oui-DB: the local file not found")
+        log.Info("the local file not found. Trying to get a new one...")
         err := DownloadOui(fname)
         if err != nil {
-            log.Error("oui-DB: can not download oui database file", err)
+            log.Error("oui-DB: can not download", err)
             return err
         }
+        return nil
 
-    } else {
-        err := tzspanalyser.OpenOuiDb(fname)
+    } else if err != nil {
         return err
-        UpdateOuidb(fname)
     }
-    return nil
+
+    return tzspanalyser.OpenOuiDb(fname)
 }
 
+// UpdateOuidb download new database if it expired
 func UpdateOuidb(fname string) {
     if WeNeedNewFile(fname) {
         err := DownloadOui(fname)
